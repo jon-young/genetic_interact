@@ -4,13 +4,16 @@
 Predict genetic interactions using a functional gene network 
 and known interactions
 
-PARAMETERS:
+HARD-CODED PARAMETERS:
     1.) functional network file path
     2.) save or load adjacency matrix
     3.) BIOGRID file
-    4.) how many seed sets to write out to text
+    4.) how many seed sets to write out (AUC)
+    5.) filepath for Entrez-to-name conversion
+    6.) entrez2names[ ][0] vs entrez2names[ ]
 """
 
+import bisect
 import collections
 import matplotlib.pyplot as plt
 import numpy
@@ -168,19 +171,22 @@ def write_seeds_text(seed2interactors, seedAUC, expmntSys):
         2.) <list> [(seed AUC, seed Entrez)]
         3.) <string> type of genetic interaction
     """
-    dataPath = os.path.join('..', '..', 'PyPickle', 'entrez2names.p')
+    AUCcutoff = 0.9
+    aucs = [v[0] for v in seedAUC]  # sorted in ascending order
+    cutIndex = len(aucs) - bisect.bisect_left(aucs, AUCcutoff)
+    dataPath = '/work/jyoung/PyPickle/flyentrez2names.p'
     entrez2names = pickle.load(open(dataPath, 'rb'))
-    outPath = os.path.join('..', 'results', '') + expmntSys + '_seed_sets.txt'
+    expmntSys = expmntSys.replace(' ', '')
+    outPath = '../results/' + expmntSys + '_seed_sets.txt'
     outFile = open(outPath, 'w')
-    topNum = 50  # number of best-scoring seeds to output
-    for i in range(1, topNum+1):
+    for i in range(1, cutIndex+1):
         outFile.write('AUC = %.2f\t' %seedAUC[-i][0])
-        outFile.write(entrez2names[seedAUC[-i][1]][0] + ': ')
+        outFile.write(entrez2names[seedAUC[-i][1]] + ': ')
         intactEntrez = seed2interactors[seedAUC[-i][1]]
         if len(intactEntrez) > 1:
             for j in range(len(intactEntrez)-1):
-                outFile.write(entrez2names[intactEntrez[j]][0] + ', ')
-        outFile.write(entrez2names[intactEntrez[len(intactEntrez)-1]][0] + '\n')
+                outFile.write(entrez2names[intactEntrez[j]] + ', ')
+        outFile.write(entrez2names[intactEntrez[len(intactEntrez)-1]] + '\n')
     outFile.close()
 
 
@@ -188,18 +194,18 @@ def main():
     experimentSys = sys.argv[1]
     node2edgewt = process_func_net()
     entrez2idx = get_entrez_indices(node2edgewt)
-    adjMat = build_netwk_adj_matrix(node2edgewt, entrez2idx)
+    ##adjMat = build_netwk_adj_matrix(node2edgewt, entrez2idx)
     matrixPath = '../data/FlyNet_adj_matrix.npy'
-    numpy.save(matrixPath, adjMat)
-    ##adjMat = numpy.load(matrixPath)
+    ##numpy.save(matrixPath, adjMat)
+    adjMat = numpy.load(matrixPath)
     print('Number of genes in functional network:', len(entrez2idx.keys()))
     ##seedSets = read_known_interact()
     seedSets = read_biogrid(experimentSys)
     seedAUC, seed2interactors = seed_set_predictability(entrez2idx, 
             adjMat, seedSets)
     print('Number of seed sets:', len(seedAUC))
-    ##write_seeds_text(seed2interactors, seedAUC, experimentSys)
-    plot_aucs(seedAUC)
+    write_seeds_text(seed2interactors, seedAUC, experimentSys)
+    ##plot_aucs(seedAUC)
 
 
 if __name__=="__main__":
