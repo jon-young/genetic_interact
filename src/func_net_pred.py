@@ -8,9 +8,10 @@ HARD-CODED PARAMETERS:
     1.) functional network file path
     2.) save or load adjacency matrix
     3.) BIOGRID file
-    4.) how many seed sets to write out (AUC)
-    5.) filepath for Entrez-to-name conversion
-    6.) entrez2names[ ][0] vs entrez2names[ ]
+    4.) columns in BIOGRID file to read
+    5a.) how many seed sets to write out (AUC)
+    5b.) filepath for Entrez-to-name conversion
+    5c.) entrez2names[ ][0] vs entrez2names[ ]
 """
 
 import bisect
@@ -93,7 +94,8 @@ def read_known_interact():
 def read_biogrid(experimentSys):
     """
     Read BIOGRID genetic interactions and return dictionary converting each 
-    Entrez gene ID to its genetic interaction partners (also in Entrez)
+    interactor ID to its genetic interaction partners
+    NOTE: the correct column numbers need to be specified beforehand
     ARGUMENTS:
         <string> type of genetic interaction
     RETURNS:
@@ -101,14 +103,14 @@ def read_biogrid(experimentSys):
     """
     seedSets = collections.defaultdict(set)
     allGenes = set()
-    filepath = '../data/BIOGRID-3.3.124-fly.txt'
+    filepath = '../data/BIOGRID-3.4.127-for-yeastnetv2.txt'
     experimentalSysColNum = 11
     for line in open(filepath):
         tokens = line.split('\t')
         if tokens[experimentalSysColNum] == experimentSys:
-            seedSets[tokens[1]].add(tokens[2])
-            seedSets[tokens[2]].add(tokens[1])
-            allGenes.update([tokens[1], tokens[2]])
+            seedSets[tokens[5]].add(tokens[6])
+            seedSets[tokens[6]].add(tokens[5])
+            allGenes.update([tokens[5], tokens[6]])
     print('Number of genes in interactions:', len(allGenes))
     return seedSets
 
