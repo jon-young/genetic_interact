@@ -9,9 +9,8 @@ HARD-CODED PARAMETERS:
     2.) save or load adjacency matrix
     3.) BIOGRID file
     4.) columns in BIOGRID file to read
-    5a.) how many seed sets to write out (AUC)
+    5a.) whether to perform gene name conversion
     5b.) filepath for Entrez-to-name conversion
-    5c.) entrez2names[ ][0] vs entrez2names[ ]
 """
 
 import bisect
@@ -31,7 +30,7 @@ def process_func_net():
         <dict> {(Entrez ID1, Entrez ID2): LLS}
     """
     node2edgewt = dict()
-    netwk = '../data/FlyNetEntrez-noNull.txt'
+    netwk = '/work/jyoung/DataDownload/FunctionalNet/yeastnet2.gene.txt'
     scoreCol = 2
     for line in open(netwk):
         tokens = line.split('\t')
@@ -39,35 +38,34 @@ def process_func_net():
     return node2edgewt
 
 
-def get_entrez_indices(node2edgewt):
+def assign_gene_indices(node2edgewt):
     """
-    Assign indices to Entrez IDs to facilitate adjacency matrix creation
+    Assign indices to genes to facilitate adjacency matrix creation
     ARGUMENTS:
-        <dict> {(Entrez ID1, Entrez ID2): LLS}
+        <dict> {(gene node 1, gene node 2): LLS}
     RETURNS:
-        <dict> {Entrez ID: matrix index}
+        <dict> {gene: matrix index}
     """
-    entrezSet = set()
-    entrez2idx = dict()
+    allGenes = set()
     for vx in node2edgewt.keys():
-        entrezSet.update(vx)
-    entrezList = sorted([int(n) for n in entrezSet])
-    for n,entrezID in enumerate(entrezList):
-        entrez2idx[str(entrezID)] = n
-    return entrez2idx
+        allGenes.update(vx)
+    geneList = sorted(allGenes)
+    gene2idx = {gene: i for i, gene in enumerate(geneList)}
+    return gene2idx
 
 
-def build_netwk_adj_matrix(node2edgewt, entrez2idx):
+def build_netwk_adj_matrix(node2edgewt, gene2idx):
     """
     ARGUMENTS:
-        <dict> {(Entrez ID1, Entrez ID2): LLS}
-        <dict> {Entrez ID: matrix index}
+        <dict> {(gene node 1, gene node 2): LLS}
+        <dict> {gene: matrix index}
     RETURNS:
-        <ndarray> adjacency matrix"""
-    adjMat = numpy.zeros((len(entrez2idx),len(entrez2idx)))
+        <ndarray> adjacency matrix
+    """
+    adjMat = numpy.zeros((len(gene2idx), len(gene2idx)))
     for vx in node2edgewt.keys():
-        adjMat[entrez2idx[vx[0]], entrez2idx[vx[1]]] = node2edgewt[vx]
-        adjMat[entrez2idx[vx[1]], entrez2idx[vx[0]]] = node2edgewt[vx]
+        adjMat[gene2idx[vx[0]], gene2idx[vx[1]]] = node2edgewt[vx]
+        adjMat[gene2idx[vx[1]], gene2idx[vx[0]]] = node2edgewt[vx]
     return adjMat
 
 
@@ -95,7 +93,8 @@ def read_biogrid(experimentSys):
     """
     Read BIOGRID genetic interactions and return dictionary converting each 
     interactor ID to its genetic interaction partners
-    NOTE: the correct column numbers need to be specified beforehand
+    NOTE: the correct column numbers need to be specified beforehand: 1 & 2 
+    for Entrez, 5 & 6 for systematic name, 7 & 8 for official symbol
     ARGUMENTS:
         <string> type of genetic interaction
     RETURNS:
@@ -108,47 +107,47 @@ def read_biogrid(experimentSys):
     for line in open(filepath):
         tokens = line.split('\t')
         if tokens[experimentalSysColNum] == experimentSys:
-            seedSets[tokens[5]].add(tokens[6])
-            seedSets[tokens[6]].add(tokens[5])
-            allGenes.update([tokens[5], tokens[6]])
+            seedSets[tokens[7]].add(tokens[8])
+            seedSets[tokens[8]].add(tokens[7])
+            allGenes.update([tokens[7], tokens[8]])
     print('Number of genes in interactions:', len(allGenes))
     return seedSets
 
 
-def seed_set_predictability(entrez2idx, adjMat, seedSets):
+def seed_set_predictability(gene2idx, adjMat, seedSets):
     """
     For each seed gene, measure its predictability for genetic interaction by 
     AUC. Also return a dictionary converting the seed gene (provided it is in 
     the network) to the set of its genetic interaction partners that are also 
     in the network.
     ARGUMENTS:
-        1.) <dict> {Entrez: adjacency matrix index}
+        1.) <dict> {gene: adjacency matrix index}
         2.) <ndarray> adjacency matrix
-        3.) <dict> {seed Entrez: {interactors' Entrez}}
+        3.) <dict> {seed gene: {genetic interactors}}
     RETURNS:
-        1.) <list> [(seed AUC, seed Entrez)]
-        2.) <dict> {seed Entrez in func net: {interactors' Entrez in func net}}
+        1.) <list> [(seed AUC, seed gene)]
+        2.) <dict> {seed gene in func net: [interactors in func net]}
     """
     seedAUC = list()
     seed2interactors = dict()
-    idx2entrez = pyuserfcn.invert_dict(entrez2idx)
+    idx2gene = pyuserfcn.invert_dict(gene2idx)
     numCols = adjMat.shape[1]
     for seedGene in seedSets.keys():
-        if seedGene in entrez2idx:
+        if seedGene in gene2idx:
             interactors = seedSets[seedGene]
-            seedIdx = [entrez2idx[i] for i in interactors if i in entrez2idx]
+            seedIdx = [gene2idx[i] for i in interactors if i in gene2idx]
             if len(seedIdx) > 0:
                 llsSum = numpy.sum(adjMat[seedIdx,:], axis=0)
                 trueLabels = numpy.zeros(numCols, dtype=numpy.int)
                 trueLabels[seedIdx] = 1
-                fpr,tpr,thresholds = metrics.roc_curve(trueLabels, llsSum)
+                fpr, tpr, thresholds = metrics.roc_curve(trueLabels, llsSum)
                 seedAUC.append( (metrics.auc(fpr, tpr), seedGene) )
-                seed2interactors[seedGene] = [idx2entrez[x] for x in seedIdx]
+                seed2interactors[seedGene] = [idx2gene[x] for x in seedIdx]
     seedAUC.sort()
     return seedAUC, seed2interactors
 
 
-def plot_aucs(seedAUC):
+def plot_aucs(seedAUC, experimentSys):
     """
     ARGUMENTS: <list> [(seed AUC, seed Entrez)]
     """
@@ -157,57 +156,65 @@ def plot_aucs(seedAUC):
     plt.barh(pos, aucs, height=1.0, align='center')
     plt.ylim([0, len(aucs)+1])
     ax = plt.axes()
-    ##ax.get_yaxis().set_visible(False)
-    ##ax.set_yticklabels([])
-    ##plt.tick_params(axis='x', labelsize='24')
+    ax.set_yticklabels([])
     plt.xlabel('AUC')
+    plt.ylabel('Seed sets')
+    plt.tight_layout()
+    saveName = '../results/' + experimentSys + '.svg'
+    plt.savefig(saveName, bbox_inches='tight')
     plt.show()
 
 
 def write_seeds_text(seed2interactors, seedAUC, expmntSys):
     """
+    NOTE: If conversion needed, then it must be done before calling function
     Writes out seed genes and their interactors in the following format:
     AUC = %.2f seed gene symbol: interactor symbols
     ARUGMENTS: 
-        1.) <dict> {seed Entrez in func net: {interactors' Entrez in func net}}
-        2.) <list> [(seed AUC, seed Entrez)]
+        1.) <dict> {seed gene in func net: [interactors in func net]}
+        2.) <list> [(seed AUC, seed gene)]
         3.) <string> type of genetic interaction
     """
     AUCcutoff = 0.9
     aucs = [v[0] for v in seedAUC]  # sorted in ascending order
     cutIndex = len(aucs) - bisect.bisect_left(aucs, AUCcutoff)
-    dataPath = '/work/jyoung/PyPickle/flyentrez2names.p'
-    entrez2names = pickle.load(open(dataPath, 'rb'))
     expmntSys = expmntSys.replace(' ', '')
     outPath = '../results/' + expmntSys + '_seed_sets.txt'
     outFile = open(outPath, 'w')
     for i in range(1, cutIndex+1):
         outFile.write('AUC = %.2f\t' %seedAUC[-i][0])
-        outFile.write(entrez2names[seedAUC[-i][1]] + ': ')
-        intactEntrez = seed2interactors[seedAUC[-i][1]]
-        if len(intactEntrez) > 1:
-            for j in range(len(intactEntrez)-1):
-                outFile.write(entrez2names[intactEntrez[j]] + ', ')
-        outFile.write(entrez2names[intactEntrez[len(intactEntrez)-1]] + '\n')
+        outFile.write(seedAUC[-i][1] + ': ')
+        interactors = seed2interactors[seedAUC[-i][1]]
+        if len(interactors) > 1:
+            for j in range(len(interactors)-1):
+                outFile.write(interactors[j] + ', ')
+        outFile.write(interactors[len(interactors)-1] + '\n')
     outFile.close()
 
 
 def main():
     experimentSys = sys.argv[1]
     node2edgewt = process_func_net()
-    entrez2idx = get_entrez_indices(node2edgewt)
-    ##adjMat = build_netwk_adj_matrix(node2edgewt, entrez2idx)
-    matrixPath = '../data/FlyNet_adj_matrix.npy'
+    gene2idx = assign_gene_indices(node2edgewt)
+    ##adjMat = build_netwk_adj_matrix(node2edgewt, gene2idx)
+    matrixPath = '../data/YeastNet2_adj_matrix.npy'
     ##numpy.save(matrixPath, adjMat)
     adjMat = numpy.load(matrixPath)
-    print('Number of genes in functional network:', len(entrez2idx.keys()))
-    ##seedSets = read_known_interact()
+    print('Number of genes in functional network:', len(gene2idx.keys()))
     seedSets = read_biogrid(experimentSys)
-    seedAUC, seed2interactors = seed_set_predictability(entrez2idx, 
-            adjMat, seedSets)
+    seedAUC, seed2interactors = seed_set_predictability(gene2idx, adjMat, 
+            seedSets)
     print('Number of seed sets:', len(seedAUC))
+    ##plot_aucs(seedAUC, experimentSys)
+    CONVERSFLAG = 0
+    if CONVERSFLAG:
+        converSource = '/work/jyoung/PyPickle/flyentrez2names.p'
+        id1toid2 = pickle.load(open(converSource, 'rb'))
+        # NOTE: converSource should be based from network
+        seedAUC = [(p[0], id1toid2[p[1]]) for p in seedAUC]
+        seed2interactors = {id1toid2[k]: list({id1toid2[x] 
+            for x in seed2interactors[k]}) for k in seed2interactors} 
     write_seeds_text(seed2interactors, seedAUC, experimentSys)
-    ##plot_aucs(seedAUC)
 
 
 if __name__=="__main__":
