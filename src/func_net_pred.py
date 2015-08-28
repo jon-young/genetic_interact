@@ -16,7 +16,7 @@ HARD-CODED PARAMETERS:
 import bisect
 import collections
 import matplotlib.pyplot as plt
-import numpy
+import numpy as np
 import pickle
 import pyuserfcn
 import sys
@@ -25,9 +25,9 @@ from sklearn import metrics
 
 def process_func_net():
     """
-    Get nodes and edge weights of HumanNet and store in dictionary
+    Get nodes and edge weights of functional net and store in dictionary
     RETURNS:
-        <dict> {(Entrez ID1, Entrez ID2): LLS}
+        <dict> {(gene ID1, gene ID2): LLS}
     """
     node2edgewt = dict()
     netwk = '/work/jyoung/DataDownload/FunctionalNet/yeastnet2.gene.txt'
@@ -62,24 +62,22 @@ def build_netwk_adj_matrix(node2edgewt, gene2idx):
     RETURNS:
         <ndarray> adjacency matrix
     """
-    adjMat = numpy.zeros((len(gene2idx), len(gene2idx)))
+    adjMat = np.zeros((len(gene2idx), len(gene2idx)))
     for vx in node2edgewt.keys():
         adjMat[gene2idx[vx[0]], gene2idx[vx[1]]] = node2edgewt[vx]
         adjMat[gene2idx[vx[1]], gene2idx[vx[0]]] = node2edgewt[vx]
     return adjMat
 
 
-def read_known_interact():
+def read_known_interact(filePath):
     """
     For files containing only the interacting gene pairs on each line
     (each gene in a column)
     RETURNS:
-        <dict> {seed Entrez: {interactors' Entrez}}
+        <dict> {seed gene: {interactors' genes}}
     """
     seedSets = collections.defaultdict(set)
     allGenes = set()
-    filePath = os.path.join('..', 'data', 'user_gen', 
-            'intact_gene_intact_human.entrez')
     for line in open(filePath):
         tokens = line.rstrip().split('\t')
         seedSets[tokens[0]].add(tokens[1])
@@ -137,8 +135,8 @@ def seed_set_predictability(gene2idx, adjMat, seedSets):
             interactors = seedSets[seedGene]
             seedIdx = [gene2idx[i] for i in interactors if i in gene2idx]
             if len(seedIdx) > 0:
-                llsSum = numpy.sum(adjMat[seedIdx,:], axis=0)
-                trueLabels = numpy.zeros(numCols, dtype=numpy.int)
+                llsSum = np.sum(adjMat[seedIdx,:], axis=0)
+                trueLabels = np.zeros(numCols, dtype=np.int)
                 trueLabels[seedIdx] = 1
                 fpr, tpr, thresholds = metrics.roc_curve(trueLabels, llsSum)
                 seedAUC.append( (metrics.auc(fpr, tpr), seedGene) )
@@ -152,7 +150,7 @@ def plot_aucs(seedAUC, experimentSys):
     ARGUMENTS: <list> [(seed AUC, seed Entrez)]
     """
     aucs = [t[0] for t in seedAUC]
-    pos = numpy.arange(1, len(aucs)+1)
+    pos = np.arange(1, len(aucs)+1)
     plt.barh(pos, aucs, height=1.0, align='center')
     plt.ylim([0, len(aucs)+1])
     ax = plt.axes()
@@ -160,8 +158,8 @@ def plot_aucs(seedAUC, experimentSys):
     plt.xlabel('AUC')
     plt.ylabel('Seed sets')
     plt.tight_layout()
-    saveName = '../results/' + experimentSys + '.svg'
-    plt.savefig(saveName, bbox_inches='tight')
+    ##saveName = '../results/' + experimentSys + '.svg'
+    ##plt.savefig(saveName, bbox_inches='tight')
     plt.show()
 
 
@@ -192,29 +190,118 @@ def write_seeds_text(seed2interactors, seedAUC, expmntSys):
     outFile.close()
 
 
+def report_predictions(gene2idx, adjMat, seedSets):
+    """
+    Return predicted genetic interactors of a seed gene. If any gene ranks 
+    higher in LLS than any seed gene interactor, then it is itself a 
+    predicted interactor. 
+    INPUT:
+        1.) <dict> {gene: adjacency matrix index}
+        2.) <ndarray> adjacency matrix
+        3.) <dict> {seed gene: {genetic interactors}}
+    OUTPUT:
+        1.) <list> [(seed AUC, seed gene)]
+        2.) <dict> {seed gene: [predicted interactors]}
+    """
+    seedAUC = list()
+    seed2pred = dict()
+    idx2gene = pyuserfcn.invert_dict(gene2idx)
+    numCols = adjMat.shape[1]
+    for seedGene in seedSets.keys():
+        if seedGene in gene2idx:
+            interactors = seedSets[seedGene]
+            seedIdx = [gene2idx[i] for i in interactors if i in gene2idx]
+            if len(seedIdx) > 0:
+                llsSum = np.sum(adjMat[seedIdx,:], axis=0)
+                trueLabels = np.zeros(numCols, dtype=np.int)
+                trueLabels[seedIdx] = 1
+                llsSort, trueSort = zip(*sorted(list(zip(llsSum, trueLabels)), 
+                    reverse=True))
+                trueSort = np.array(trueSort)
+                maxTrue = np.amax(np.where(trueSort == 1))
+                sortIdx = np.argsort(llsSum)[::-1]
+                geneIdx = sortIdx[:maxTrue][np.logical_not(trueSort[:maxTrue])]
+                predForSeed = [idx2gene[idx] for idx in geneIdx]
+                auc = metrics.roc_auc_score(trueLabels, llsSum)
+                seedAUC.append((auc, seedGene))
+                seed2pred[seedGene] = predForSeed
+    return seedAUC, seed2pred
+
+
+def eval_performance(seedAUC, seed2pred, experimentSys):
+    """
+    Use ROC to evaluate performance of genetic interactors predicted from known 
+    interactions from a given time period. Interactions from later time periods 
+    comprise the gold-standard benchmark. 
+    INPUT:
+        1.) <list> [(seed AUC, seed gene)]
+        2.) <dict> {seed gene: [predicted interactors]}
+    """
+    dataFolder = '/work/jyoung/genetic_interact/data/yeast_time_split/'
+    fileSuffix = '-' + ''.join(experimentSys.split()) + '.txt'
+    pre2007file = 'pre2007' + fileSuffix
+    pre2007 = read_known_interact(dataFolder + pre2007file)
+    post2009file = 'post2009' + fileSuffix
+    post2009 = read_known_interact(dataFolder + post2009file)
+    seedAUC.sort(reverse=True)
+    aucs, seedGenes = zip(*seedAUC)
+    upperLim = 1.0
+    lowerLim = 0.90
+    start = bisect.bisect(aucs, upperLim)
+    end = bisect.bisect(aucs, lowerLim)
+    y_true = list()
+    for i in range(start, end):
+        seed = seedAUC[i][1]
+        if seed in post2009:
+            for pred in seed2pred[seed]:
+                if pred in post2009[seed]:
+                    y_true.append(1)
+                else:
+                    if seed in pre2007:
+                        if pred not in pre2007[seed]:
+                            y_true.append(0)
+                    else:
+                        y_true.append(0)
+    y_score = list(range(len(y_true), 0, -1))
+    fpr, tpr, thresholds = metrics.roc_curve(y_true, y_score)
+    plt.plot(fpr, tpr)
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Performance of predictions for', experimentSys)
+    plt.show()
+
+
 def main():
     experimentSys = sys.argv[1]
     node2edgewt = process_func_net()
     gene2idx = assign_gene_indices(node2edgewt)
     ##adjMat = build_netwk_adj_matrix(node2edgewt, gene2idx)
     matrixPath = '../data/YeastNet2_adj_matrix.npy'
-    ##numpy.save(matrixPath, adjMat)
-    adjMat = numpy.load(matrixPath)
+    ##np.save(matrixPath, adjMat)
+    adjMat = np.load(matrixPath)
     print('Number of genes in functional network:', len(gene2idx.keys()))
-    seedSets = read_biogrid(experimentSys)
-    seedAUC, seed2interactors = seed_set_predictability(gene2idx, adjMat, 
-            seedSets)
-    print('Number of seed sets:', len(seedAUC))
+    ##seedSets = read_biogrid(experimentSys)
+    ##seedAUC, seed2interactors = seed_set_predictability(gene2idx, adjMat, 
+    ##        seedSets)
+    ##print('Number of seed sets:', len(seedAUC))
     ##plot_aucs(seedAUC, experimentSys)
     CONVERSFLAG = 0
     if CONVERSFLAG:
-        converSource = '/work/jyoung/PyPickle/flyentrez2names.p'
+        converSource = '/work/jyoung/PyPickle/humanEntrez2names.p'
         id1toid2 = pickle.load(open(converSource, 'rb'))
         # NOTE: converSource should be based from network
         seedAUC = [(p[0], id1toid2[p[1]]) for p in seedAUC]
         seed2interactors = {id1toid2[k]: list({id1toid2[x] 
             for x in seed2interactors[k]}) for k in seed2interactors} 
-    write_seeds_text(seed2interactors, seedAUC, experimentSys)
+    ##write_seeds_text(seed2interactors, seedAUC, experimentSys)
+    dataFolder = '/work/jyoung/genetic_interact/data/yeast_time_split/'
+    incl0709file = 'incl0709' + '-' + ''.join(experimentSys.split()) + '.txt'
+    incl0709 = read_known_interact(dataFolder + incl0709file)
+    seedAUC, seed2pred = report_predictions(gene2idx, adjMat, incl0709)
+    eval_performance(seedAUC, seed2pred, experimentSys)
 
 
 if __name__=="__main__":
