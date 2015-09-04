@@ -280,6 +280,30 @@ def eval_performance(seedAUC, seed2pred, experimentSys):
     plt.show()
 
 
+def eval_time_split_pred(gene2idx, adjMat, seedSet1, seedSet2):
+    """
+    
+    """
+    aucSeedGenes = list()
+    idx2gene = pyuserfcn.invert_dict(gene2idx)
+    numCols = adjMat.shape[1]
+    commonGenes = set(seedSet1.keys()) & set(seedSet2.keys())
+    for seedGene in commonGenes:
+        if seedGene in gene2idx:
+            interactors1 = seedSet1[seedGene]
+            interactors2 = seedSet2[seedGene]
+            seedIdx1 = [gene2idx[i] for i in interactors1 if i in gene2idx]
+            seedIdx2 = [gene2idx[i] for i in interactors2 if i in gene2idx]
+            if len(seedIdx1) > 0 and len(seedIdx2) > 0:
+                llsSum = np.sum(adjMat[seedIdx1,:], axis=0)
+                trueLabels = np.zeros(numCols, dtype=np.int)
+                trueLabels[seedIdx2] = 1
+                auc = metrics.roc_auc_score(trueLabels, llsSum)
+                aucSeedGenes.append((auc, seedGene))
+    aucSeedGenes.sort()
+    return aucSeedGenes
+
+
 def main():
     experimentSys = sys.argv[1]
     node2edgewt = process_func_net()
@@ -302,12 +326,14 @@ def main():
             for x in seed2interactors[k]}) for k in seed2interactors} 
     ##write_seeds_text(seed2interactors, seedAUC, experimentSys)
     dataFolder = '/work/jyoung/genetic_interact/data/yeast_time_split/'
-    incl0709file = 'incl0709' + '-' + ''.join(experimentSys.split()) + '.txt'
+    fileSuffix = '-' + ''.join(experimentSys.split()) + '.txt'
+    incl0709file = 'incl0709' + fileSuffix
     incl0709 = read_known_interact(dataFolder + incl0709file)
-    seedAUC, seed2pred = report_predictions(gene2idx, adjMat, incl0709)
-    print('Number of seed sets:', len(seedAUC))
-    ##plot_aucs(seedAUC, experimentSys)
-    eval_performance(seedAUC, seed2pred, experimentSys)
+    post2009file = 'post2009' + fileSuffix
+    post2009 = read_known_interact(dataFolder + post2009file)
+    aucSeedGenes = eval_time_split_pred(gene2idx, adjMat, incl0709, post2009)
+    print('Number of seed genes:', len(aucSeedGenes))
+    plot_aucs(aucSeedGenes, experimentSys)
 
 
 if __name__=="__main__":
