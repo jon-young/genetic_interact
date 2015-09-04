@@ -284,7 +284,8 @@ def eval_time_split_pred(gene2idx, adjMat, seedSet1, seedSet2):
     """
     
     """
-    aucSeedGenes = list()
+    seedAUC1 = list()
+    seedAUC2 = dict()
     idx2gene = pyuserfcn.invert_dict(gene2idx)
     numCols = adjMat.shape[1]
     commonGenes = set(seedSet1.keys()) & set(seedSet2.keys())
@@ -296,12 +297,17 @@ def eval_time_split_pred(gene2idx, adjMat, seedSet1, seedSet2):
             seedIdx2 = [gene2idx[i] for i in interactors2 if i in gene2idx]
             if len(seedIdx1) > 0 and len(seedIdx2) > 0:
                 llsSum = np.sum(adjMat[seedIdx1,:], axis=0)
-                trueLabels = np.zeros(numCols, dtype=np.int)
-                trueLabels[seedIdx2] = 1
-                auc = metrics.roc_auc_score(trueLabels, llsSum)
-                aucSeedGenes.append((auc, seedGene))
-    aucSeedGenes.sort()
-    return aucSeedGenes
+                trueLabels1 = np.zeros(numCols, dtype=np.int)
+                trueLabels1[seedIdx1] = 1
+                auc1 = metrics.roc_auc_score(trueLabels1, llsSum)
+                trueLabels2 = np.zeros(numCols, dtype=np.int)
+                trueLabels2[seedIdx2] = 1
+                auc2 = metrics.roc_auc_score(trueLabels2, llsSum)
+                seedAUC1.append((auc1, seedGene))
+                seedAUC2[seedGene] = auc2
+    seedAUC1.sort()
+    return [(seedAUC2[p[1]], p[1]) for p in seedAUC1 
+            if p[0] >= 0.8 and p[0] < 1.0]
 
 
 def main():
@@ -332,7 +338,6 @@ def main():
     post2009file = 'post2009' + fileSuffix
     post2009 = read_known_interact(dataFolder + post2009file)
     aucSeedGenes = eval_time_split_pred(gene2idx, adjMat, incl0709, post2009)
-    print('Number of seed genes:', len(aucSeedGenes))
     plot_aucs(aucSeedGenes, experimentSys)
 
 
