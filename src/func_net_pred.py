@@ -6,11 +6,10 @@ and known interactions
 
 HARD-CODED PARAMETERS:
     1.) functional network file path
-    2.) save or load adjacency matrix
-    3.) BIOGRID file
-    4.) columns in BIOGRID file to read
-    5a.) whether to perform gene name conversion
-    5b.) filepath for Entrez-to-name conversion
+    2.) BIOGRID file
+    3.) columns in BIOGRID file to read
+    4a.) whether to perform gene name conversion
+    4b.) filepath for Entrez-to-name conversion
 """
 
 import bisect
@@ -21,7 +20,6 @@ import numpy as np
 import os
 import pickle
 import pyuserfcn
-import scipy.stats as stats
 import sys
 from sklearn import metrics
 
@@ -97,7 +95,7 @@ def read_biogrid(experimentSys):
     """
     seedSets = collections.defaultdict(set)
     allGenes = set()
-    filepath = '../data/BIOGRID-3.4.127-for-yeastnetv2.txt'
+    filepath = os.path.join('..', 'data', 'BIOGRID-3.4.127-for-yeastnetv2.txt')
     experimentalSysColNum = 11
     for line in open(filepath):
         tokens = line.split('\t')
@@ -191,9 +189,9 @@ def read_SGA(interactionType):
     pvalCol = 6
     gene2tested = collections.defaultdict(set)
     interactingPairs = set()
-    folder = '/work/jyoung/DataDownload/Yeast_SGA/'
-    os.chdir(folder)
-    for line in open('sgadata_costanzo2009_rawdata_101120.txt'):
+    folder = os.path.join('..', '..', 'DataDownload', 'Yeast_SGA', '')
+    fname = 'sgadata_costanzo2009_rawdata_101120.txt'
+    for line in open(folder + fname):
         tokens = line.rstrip().split('\t')
         gene2tested[tokens[queryGeneNameCol]].add(tokens[arrayGeneNameCol])
         gene2tested[tokens[arrayGeneNameCol]].add(tokens[queryGeneNameCol])
@@ -213,14 +211,14 @@ def read_SGA(interactionType):
     return gene2tested, interactingPairs
 
 
-def eval_time_split_pred(gene2idx, adjMat, seedSets):
+def eval_time_split_pred(typeForEval, gene2idx, adjMat, seedSets):
     """Using the Costanzo (2010) dataset as a gold standard benchmark. Note that 
     this necessitates that the genetic interaction type is either 'Negative 
     Genetic' or 'Positive Genetic'."""
-    seedScores = list()
-    gene2tested, interactPairs = read_SGA('positive')
+    y_true_all = list()
+    y_score_all = list()
+    gene2tested, interactPairs = read_SGA(typeForEval)
     idx2gene = pyuserfcn.invert_dict(gene2idx)
-    numCols = adjMat.shape[1]
     for seedGene in seedSets.keys():
         # check if seed gene in network and if included in SGA
         if seedGene in gene2idx and seedGene in gene2tested:
@@ -228,10 +226,7 @@ def eval_time_split_pred(gene2idx, adjMat, seedSets):
             seedIdx = [gene2idx[i] for i in interactors if i in gene2idx]
             if len(seedIdx) > 0:
                 llsSum = np.sum(adjMat[seedIdx, :], axis=0)
-                trueLabels = np.zeros(numCols, dtype=np.int)
-                trueLabels[seedIdx] = 1
-                predictiveAUC = metrics.roc_auc_score(trueLabels, llsSum)
-                # now examine performance of LLS predictability
+                # now make true/false calls on interactions
                 y_true = list()
                 y_score = list()
                 for i in range(len(llsSum)):
@@ -246,22 +241,38 @@ def eval_time_split_pred(gene2idx, adjMat, seedSets):
                         y_score.append(llsSum[i])
                     else:  # not tested in SGA
                         pass
-                try:
-                    performanceAUC = metrics.roc_auc_score(y_true, y_score)
-                    seedScores.append((seedGene, predictiveAUC, performanceAUC))
-                except:
-                    pass
+                y_true_all.extend(y_true)
+                y_score_all.extend(y_score)
+    y_true_all = np.array(y_true_all)
+    y_score_all = np.array(y_score_all)
+    # test y_true_all and y_score_all are same size
+    if y_true_all.size == y_score_all.size:
+        print('y_true_all and y_score_all are the same size.')
+        print('Size of y_true_all:', y_true_all.size)
+        print('Size of y_score_all:', y_score_all.size, '\n')
+    else:
+        print('y_true_all and y_score_all are NOT the same size. Exiting...\n')
+        sys.exit()
     # plot performance by AUC of seed genes
-    seedScores.sort(key=lambda f:f[1])
-    seedGeneList, xaxis, yaxis = zip(*seedScores)
-    scc, sig = stats.spearmanr(xaxis, yaxis)
-    plt.plot(xaxis, yaxis, 'o')
-    plt.xlim(0.0, 1.0)
-    plt.ylim(0.0, 1.0)
-    plt.xlabel('Predictability of seed set')
-    plt.ylabel('Performance of seed set by AUC')
-    plt.title('Spearman correlation coefficient = %f' %scc)
-    plt.tight_layout()
+    fpr, tpr, threshROC = metrics.roc_curve(y_true_all, y_score_all)
+    auc = metrics.auc(fpr, tpr)
+    prec, rec, threshPR = metrics.precision_recall_curve(y_true_all, y_score_all)
+    plt.subplot(1, 2, 1)
+    plt.plot(fpr, tpr, label='ROC curve (area=%0.2f)' %auc)
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False positive rate')
+    plt.ylabel('True positive rate')
+    plt.title('ROC performance of predictions for %s genetic' %typeForEval)
+    plt.legend(loc='lower right')
+    plt.subplot(1, 2, 2)
+    plt.plot(rec, prec)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-recall of predictions for %s genetic' %typeForEval)
     plt.show()
 
 
@@ -269,14 +280,16 @@ def main():
     experimentSys = sys.argv[1]
     node2edgewt = process_func_net()
     gene2idx = assign_gene_indices(node2edgewt)
-    ##adjMat = build_netwk_adj_matrix(node2edgewt, gene2idx)
-    matrixPath = '../data/YeastNet2_adj_matrix.npy'
-    ##np.save(matrixPath, adjMat)
-    adjMat = np.load(matrixPath)
-    print('Number of genes in functional network:', len(gene2idx.keys()))
+    print('\nNumber of genes in functional network:', len(gene2idx.keys()), '\n')
+    matrixPath = os.path.join('..', 'data', 'YeastNet2_adj_matrix.npy')
+    try:
+        adjMat = np.load(matrixPath)
+    except:
+        print('Network file not found. Creating network matrix...\n')
+        adjMat = build_netwk_adj_matrix(node2edgewt, gene2idx)
+        np.save(matrixPath, adjMat)
     ##seedSets = read_biogrid(experimentSys)
-    ##seedAUC, seed2interactors = seed_set_predictability(gene2idx, adjMat, 
-    ##        seedSets)
+    ##seedAUC, seed2intacts = seed_set_predictability(gene2idx, adjMat, seedSets)
     ##plot_aucs(seedAUC, experimentSys)
     CONVERSFLAG = 0
     if CONVERSFLAG:
@@ -286,12 +299,19 @@ def main():
         seedAUC = [(p[0], id1toid2[p[1]]) for p in seedAUC]
         seed2interactors = {id1toid2[k]: list({id1toid2[x] 
             for x in seed2interactors[k]}) for k in seed2interactors} 
-    ##write_seeds_text(seed2interactors, seedAUC, experimentSys)
-    dataFolder = '/work/jyoung/genetic_interact/data/yeast_time_split/'
+    ##write_seeds_text(seed2intacts, seedAUC, experimentSys)
+    dataFolder = os.path.join('..', 'data', 'yeast_time_split', '')
     fileSuffix = '-' + ''.join(experimentSys.split()) + '.txt'
     incl0709file = 'incl0709' + fileSuffix
     incl0709 = read_known_interact(dataFolder + incl0709file)
-    eval_time_split_pred(gene2idx, adjMat, incl0709)
+    typeForEval = experimentSys.split()[0].lower()
+    if typeForEval == 'negative' or typeForEval == 'positive':
+        eval_time_split_pred(typeForEval, gene2idx, adjMat, incl0709)
+    else:
+        print('Interaction type for prediction performance evaluation') 
+        print('must be either "Negative Genetic" or "Positive Genetic."')
+        print('No validation performed. Exiting...\n')
+        sys.exit()
 
 
 if __name__=="__main__":
