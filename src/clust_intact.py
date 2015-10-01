@@ -90,10 +90,9 @@ def read_biogrid(experimentSys, filename):
     for line in open(fileDir + filename):
         tokens = line.split('\t')
         if tokens[experimentalSysColNum] == experimentSys:
-            seedSets[tokens[1]].add(tokens[2])
-            seedSets[tokens[2]].add(tokens[1])
-            allGenes.update([tokens[1], tokens[2]])
-    print('Number of genes in BIOGRID interactions:', len(allGenes), '\n')
+            seedSets[tokens[7]].add(tokens[8])
+            seedSets[tokens[8]].add(tokens[7])
+            allGenes.update([tokens[7], tokens[8]])
     return seedSets
 
 
@@ -145,6 +144,63 @@ def get_predictive_seeds(seedAUC, lowerLim, upperLim):
     return predictiveSeeds
 
 
+def jaccard(s1, s2):
+    """Calculate Jaccard index between 2 sets
+    INPUT: 1.) & 2.) <set>
+    RETURN: <float>"""
+    if isinstance(s1, set) and isinstance(s2, set):
+        return len(s1 & s2)/len(s1 | s2)
+    elif isinstance(s1, frozenset) and isinstance(s2, frozenset):
+        return len(s1 & s2)/len(s1 | s2)
+    else:
+        print('Both arguments to Jaccard must be sets. Exiting...\n')
+        sys.exit()
+
+
+def combine_sets(setOfSets):
+    """Combine various sets if they have enough in common measured by Jaccard
+    INPUT & OUTPUT: <set> elements of set are frozensets"""
+    minJaccard = 0.5
+    print('The minimum Jaccard index is', minJaccard, '\n')
+    newSetOfSets = set()
+    deleteLater = set()
+    for pair in itertools.combinations(setOfSets, 2):
+        if jaccard(pair[0], pair[1]) >= minJaccard:
+            pairUnion = pair[0] | pair[1]
+            if pairUnion == pair[0]:
+                newSetOfSets.add(pairUnion)
+                deleteLater.add(pair[1])
+            elif pairUnion == pair[1]:
+                newSetOfSets.add(pairUnion)
+                deleteLater.add(pair[0])
+            else:
+                newSetOfSets.add(pairUnion)
+                deleteLater.update((pair[0], pair[1]))
+        else:
+            newSetOfSets.update((pair[0], pair[1]))
+    newSetOfSets = {x for x in newSetOfSets if x not in deleteLater}
+    while len(newSetOfSets) != len(setOfSets):
+        setOfSets = newSetOfSets
+        newSetOfSets = set()
+        deleteLater = set()
+        for pair in itertools.combinations(setOfSets, 2):
+            if jaccard(pair[0], pair[1]) >= minJaccard:
+                pairUnion = pair[0] | pair[1]
+                if pairUnion == pair[0]:
+                    newSetOfSets.add(pairUnion)
+                    deleteLater.add(pair[1])
+                elif pairUnion == pair[1]:
+                    newSetOfSets.add(pairUnion)
+                    deleteLater.add(pair[0])
+                else:
+                    newSetOfSets.add(pairUnion)
+                    deleteLater.update((pair[0], pair[1]))
+            else:
+                newSetOfSets.update((pair[0], pair[1]))
+        newSetOfSets = {x for x in newSetOfSets if x not in deleteLater}
+    return setOfSets
+
+
 def get_interacting_pairs(seeds, seed2interactors):
     """Assemble all the genetic interactions for genes in the network into a 
     single set.
@@ -156,11 +212,10 @@ def get_interacting_pairs(seeds, seed2interactors):
     for seed in seeds:
         for interactor in seed2interactors[seed]:
             interactPairs.update([(seed, interactor), (interactor, seed)])
-    print('Number of interacting pairs:', len(interactPairs), '\n')
     return interactPairs
 
 
-def interaction_stats(seed2intacts, predictiveSeeds, interactPairs):
+def interaction_stats(interactPairs, setOfSets):
     """Get statistics of interactions between predictive seed sets
     INPUT:
         1.) <dict> {seed gene: [interactor genes]}
@@ -168,15 +223,12 @@ def interaction_stats(seed2intacts, predictiveSeeds, interactPairs):
         3.) <set> {(seed, interactor), (interactor, seed)}
     RETURNS: <list> [(1st set cnts, 2nd set cnts, num interacts, p-value)]"""
     numGenes = len(set(itertools.chain.from_iterable(interactPairs)))
-    print('Number of genes among all interactions:', numGenes, '\n')
-    p = len(interactPairs)/scipy.special.binom(numGenes, 2)
+    p = (len(interactPairs)/2)/scipy.special.binom(numGenes, 2)
     results = list()
-    for seedPair in itertools.combinations(predictiveSeeds, 2):
+    for setPair in itertools.combinations(setOfSets, 2):
         count = 0
-        num1stSet = len(seed2intacts[seedPair[0]])
-        num2ndSet = len(seed2intacts[seedPair[1]])
-        for genePair in itertools.product(seed2intacts[seedPair[0]], 
-                                          seed2intacts[seedPair[1]]):
+        num1stSet, num2ndSet = len(setPair[0]), len(setPair[1])
+        for genePair in itertools.product(setPair[0], setPair[1]):
             if genePair in interactPairs:
                 count += 1
         n = num1stSet * num2ndSet
@@ -213,13 +265,21 @@ def main():
     print('Number of genes in functional network:', len(gene2idx.keys()), '\n')
     seedSets = read_biogrid(experimentSys, biogridFile)
     seedAUC, seed2intacts = seed_set_predictability(gene2idx, adjMat, seedSets)
+    seedGenes = [x[1] for x in seedAUC]
+    interactPairs = get_interacting_pairs(seedGenes, seed2intacts)
+    
     lowerAUC = 0.8
     upperAUC = 1.0
     predictiveSeeds = get_predictive_seeds(seedAUC, lowerAUC, upperAUC)
-    seedGenes = [x[1] for x in seedAUC]
-    interactPairs = get_interacting_pairs(seedGenes, seed2intacts)
-    results = interaction_stats(seed2intacts, predictiveSeeds, interactPairs)
-    print('Number of pairs of predictive seed sets:', len(results), '\n')
+    
+    setOfSets = set()
+    for seed in predictiveSeeds:
+        setOfSets.add( frozenset(set(seed2intacts[seed])) )
+    combinedSets = combine_sets(setOfSets)
+
+    results = interaction_stats(interactPairs, combinedSets)
+    print('Number of set pairs:', len(results), '\n')
+
     # check for statistical significance
     pvals = [x[3] for x in results]
     rejected, pvalsCor = fdrcorrection0(pvals)
