@@ -7,7 +7,7 @@ For a given species and genetic interaction type, compute statistics about
 the significance of interactions between a pair of gene clusters. A cluster 
 could be genes tightly connected in a functional gene network. 
 
-Created: 10 September 2015
+Created: 2 October 2015
 
 HARD-CODED PARAMETERS:
     1.) organism common names and filenames
@@ -15,17 +15,23 @@ HARD-CODED PARAMETERS:
     3.) BIOGRID directory
     4.) columns in BIOGRID file to read
     5.) AUC upper and lower limits for predictability
+    6.) # of cluster pairs for network
+    7.) write to JSON
 """
 
 import collections
 import csv
 import itertools
+import json
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import os
 import pyuserfcn
 import scipy.special
 import scipy.stats as stats
 import sys
+from networkx.readwrite import json_graph
 from statsmodels.sandbox.stats.multicomp import fdrcorrection0
 from sklearn import metrics
 
@@ -215,26 +221,107 @@ def get_interacting_pairs(seeds, seed2interactors):
     return interactPairs
 
 
-def interaction_stats(interactPairs, setOfSets):
+def interaction_stats(interactPairs, id2set):
     """Get statistics of interactions between predictive seed sets
     INPUT:
-        1.) <dict> {seed gene: [interactor genes]}
-        2.) <list> [genes] ascend sort by AUC
-        3.) <set> {(seed, interactor), (interactor, seed)}
-    RETURNS: <list> [(1st set cnts, 2nd set cnts, num interacts, p-value)]"""
+        1.) <set> {(seed, interactor), (interactor, seed)}
+        2.) <dict> {int: frozensets}
+    RETURN <dict> {(int,int):(# in 1st set, # in 2nd set, # interact, p-val)}"""
     numGenes = len(set(itertools.chain.from_iterable(interactPairs)))
     p = (len(interactPairs)/2)/scipy.special.binom(numGenes, 2)
-    results = list()
-    for setPair in itertools.combinations(setOfSets, 2):
+    results = dict()
+    for idPair in itertools.combinations(id2set.keys(), 2):
+        set1st = id2set[idPair[0]]
+        set2nd = id2set[idPair[1]]
         count = 0
-        num1stSet, num2ndSet = len(setPair[0]), len(setPair[1])
-        for genePair in itertools.product(setPair[0], setPair[1]):
+        num1stSet, num2ndSet = len(set1st), len(set2nd)
+        for genePair in itertools.product(set1st, set2nd):
             if genePair in interactPairs:
                 count += 1
         n = num1stSet * num2ndSet
         pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
-        results.append((num1stSet, num2ndSet, count, pval))
+        results[idPair] = (num1stSet, num2ndSet, count, pval)
     return results
+
+
+def get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs):
+    """Write network input file for visualization
+    INPUTS:
+        1.) <dict> {(gene ID1, gene ID2): LLS}
+        2.) <float> p-value cutoff
+        3.) <dict> {(int,int):(# in 1st set, # in 2nd set, # interact, p-val)}
+        4.) <dict> {int: frozensets}
+        5.) <set> {(seed, interactor), (interactor, seed)}"""
+    edges = list()
+    for idPair in results.keys():
+        if results[idPair][3] <= pvalCutoff:
+            set1st = id2set[idPair[0]]
+            set2nd = id2set[idPair[1]]
+            for genePair in itertools.product(set1st, set2nd):
+                if genePair in intactPairs:
+                    edges.append((genePair[0], genePair[1], -1))
+            for genePair in itertools.combinations(set1st, 2):
+                if genePair in node2edgewt:
+                    edges.append((genePair[0], genePair[1], node2edgewt[genePair]))
+                elif (genePair[1], genePair[0]) in node2edgewt:
+                    revPair = (genePair[1], genePair[0])
+                    edges.append((genePair[1], genePair[0], node2edgewt[revPair]))
+                else:
+                    pass
+            for genePair in itertools.combinations(set2nd, 2):
+                if genePair in node2edgewt:
+                    edges.append((genePair[0], genePair[1], node2edgewt[genePair]))
+                elif (genePair[1], genePair[0]) in node2edgewt:
+                    revPair = (genePair[1], genePair[0])
+                    edges.append((genePair[1], genePair[0], node2edgewt[revPair]))
+                else:
+                    pass
+    return edges
+
+
+def plot_network(edges, experimentSys, organism, saveFlag=0):
+    """Use NetworkX to save a visualization of the gene network
+    INPUT: 
+        1.) <list> [(node, node, edge weight)]
+        2.) <string> genetic interaction type
+        3.) <string> organism"""
+    G = nx.Graph()
+    for e in edges:
+        if e[2] < 0:
+            G.add_edge(e[0], e[1], weight=0.5, style='dashed')
+        else:
+            G.add_edge(e[0], e[1], weight=e[2], style='solid')
+    weights = [G[u][v]['weight'] for u,v in G.edges()]
+    styles = [G[u][v]['style'] for u,v in G.edges()]
+    nx.draw(G, node_size=30, alpha=0.4, width=weights, style=styles)
+
+    if saveFlag:
+        writeDir = os.path.join('..', 'results', organism+'IntactClust', '')
+        writeFilename = organism + ''.join(experimentSys.split(' ')) + 'Net.svg'
+        plt.savefig(writeDir+writeFilename)
+    
+    plt.show()
+
+
+def write_json(edges, experimentSys, organism):
+    """Write network to JSON format for visualization with D3.js
+    INPUT: 
+        1.) <list> [(node, node, edge weight)]
+        2.) <string> genetic interaction type
+        3.) <string> organism"""
+    G = nx.Graph()
+    for e in edges:
+        if e[2] < 0:
+            G.add_edge(e[0], e[1], weight=0.5, style='dashed')
+        else:
+            G.add_edge(e[0], e[1], weight=e[2], style='solid')
+    weights = [G[u][v]['weight'] for u,v in G.edges()]
+    styles = [G[u][v]['style'] for u,v in G.edges()]
+    for n in G:
+        G.node[n]['name'] = n
+    d = json_graph.node_link_data(G)  # node-link format to serialize
+    writeFile = organism + ''.join(experimentSys.split(' ')) + '.json'
+    json.dump(d, open(os.path.join('..', 'd3', writeFile), 'w'))
 
 
 def main():
@@ -266,7 +353,7 @@ def main():
     seedSets = read_biogrid(experimentSys, biogridFile)
     seedAUC, seed2intacts = seed_set_predictability(gene2idx, adjMat, seedSets)
     seedGenes = [x[1] for x in seedAUC]
-    interactPairs = get_interacting_pairs(seedGenes, seed2intacts)
+    intactPairs = get_interacting_pairs(seedGenes, seed2intacts)
     
     lowerAUC = 0.8
     upperAUC = 1.0
@@ -276,15 +363,28 @@ def main():
     for seed in predictiveSeeds:
         setOfSets.add( frozenset(set(seed2intacts[seed])) )
     combinedSets = combine_sets(setOfSets)
+    id2set = {i: fs for i,fs in enumerate(combinedSets)}
 
-    results = interaction_stats(interactPairs, combinedSets)
+    results = interaction_stats(intactPairs, id2set)
     print('Number of set pairs:', len(results), '\n')
 
-    # check for statistical significance
-    pvals = [x[3] for x in results]
+    pvals = np.array([results[k][3] for k in results.keys()])
     rejected, pvalsCor = fdrcorrection0(pvals)
     numSig = np.sum(rejected)
     print('Number of significant interacting pairs (5% FDR):', numSig, '\n')
+    pvalsSig = np.sort(pvals[rejected])
+    numExam = 1
+    if numExam == 'all':
+        pvalCutoff = pvalsSig[pvalsSig.size - 1]
+    else:
+        pvalCutoff = pvalsSig[numExam - 1]
+
+    edges = get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs)
+    plot_network(edges, experimentSys, organism)
+
+    writeToJSON = 0
+    if writeToJSON:
+        write_json(edges, experimentSys, organism)
 
 
 if __name__=="__main__":
