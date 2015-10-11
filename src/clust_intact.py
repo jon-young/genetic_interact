@@ -15,7 +15,7 @@ HARD-CODED PARAMETERS:
     3.) BIOGRID directory
     4.) columns in BIOGRID file to read
     5.) AUC upper and lower limits for predictability
-    6.) # of cluster pairs for network
+    6.) # of cluster pairs for network visualization
     7.) write to JSON
 """
 
@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import os
+import pickle
 import pyuserfcn
 import scipy.special
 import scipy.stats as stats
@@ -166,9 +167,10 @@ def jaccard(s1, s2):
 def combine_sets(setOfSets):
     """Combine various sets if they have enough in common measured by Jaccard
     INPUT & OUTPUT: <set> elements of set are frozensets"""
-    minJaccard = 0.5
+    minJaccard = 0.8
     print('The minimum Jaccard index is', minJaccard, '\n')
-    newSetOfSets = set()
+    # the following 17 lines are the "do" part of a "do-while" loop
+    newSetOfSets = set()  # DO START
     deleteLater = set()
     for pair in itertools.combinations(setOfSets, 2):
         if jaccard(pair[0], pair[1]) >= minJaccard:
@@ -184,8 +186,8 @@ def combine_sets(setOfSets):
                 deleteLater.update((pair[0], pair[1]))
         else:
             newSetOfSets.update((pair[0], pair[1]))
-    newSetOfSets = {x for x in newSetOfSets if x not in deleteLater}
-    while len(newSetOfSets) != len(setOfSets):
+    newSetOfSets = {x for x in newSetOfSets if x not in deleteLater}  # DO END
+    while len(newSetOfSets) < len(setOfSets):
         setOfSets = newSetOfSets
         newSetOfSets = set()
         deleteLater = set()
@@ -204,7 +206,16 @@ def combine_sets(setOfSets):
             else:
                 newSetOfSets.update((pair[0], pair[1]))
         newSetOfSets = {x for x in newSetOfSets if x not in deleteLater}
-    return setOfSets
+    # remove sets that are subsets of other sets
+    deleteLater = set()
+    for pair in itertools.combinations(setOfSets, 2):
+        if pair[0].issubset(pair[1]):
+            deleteLater.add(pair[0])
+        elif pair[1].issubset(pair[0]):
+            deleteLater.add(pair[1])
+        else:
+            pass
+    return {s for s in setOfSets if s not in deleteLater}
 
 
 def get_interacting_pairs(seeds, seed2interactors):
@@ -257,6 +268,11 @@ def get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs):
         if results[idPair][3] <= pvalCutoff:
             set1st = id2set[idPair[0]]
             set2nd = id2set[idPair[1]]
+            print('Genes in 1st set:')  # CHECKING
+            print(set1st)  # CHECKING
+            print('Genes in 2nd set:')  # CHECKING
+            print(set2nd)  # CHECKING
+            print()
             for genePair in itertools.product(set1st, set2nd):
                 if genePair in intactPairs:
                     edges.append((genePair[0], genePair[1], -1))
@@ -293,7 +309,7 @@ def plot_network(edges, experimentSys, organism, saveFlag=0):
             G.add_edge(e[0], e[1], weight=e[2], style='solid')
     weights = [G[u][v]['weight'] for u,v in G.edges()]
     styles = [G[u][v]['style'] for u,v in G.edges()]
-    nx.draw(G, node_size=30, alpha=0.4, width=weights, style=styles)
+    nx.draw_networkx(G, node_size=0, alpha=0.5, width=weights, style=styles, font_size=10)
 
     if saveFlag:
         writeDir = os.path.join('..', 'results', organism+'IntactClust', '')
