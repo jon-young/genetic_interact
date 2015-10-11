@@ -232,7 +232,7 @@ def get_interacting_pairs(seeds, seed2interactors):
     return interactPairs
 
 
-def interaction_stats(interactPairs, id2set):
+def interaction_stats(interactPairs, id2set, gene2idx, adjMat):
     """Get statistics of interactions between predictive seed sets
     INPUT:
         1.) <set> {(seed, interactor), (interactor, seed)}
@@ -244,6 +244,24 @@ def interaction_stats(interactPairs, id2set):
     for idPair in itertools.combinations(id2set.keys(), 2):
         set1st = id2set[idPair[0]]
         set2nd = id2set[idPair[1]]
+        #--- BEGIN NEW
+        list1st = list(set1st - set2nd)
+        list2nd = list(set2nd - set1st)
+        deleteSet = set()
+        for i in range(len(list1st) - 1):
+            gene = list1st[i]
+            partners = [gene2idx[g] for g in list1st[i+1:]]
+            if np.sum(adjMat[gene2idx[gene], partners], axis=0) == 0:
+                deleteSet.add(gene)
+        set1st = {g for g in list1st if g not in deleteSet}
+        deleteSet = set()
+        for i in range(len(list2nd) - 1):
+            gene = list2nd[i]
+            partners = [gene2idx[g] for g in list2nd[i+1:]]
+            if np.sum(adjMat[gene2idx[gene], partners], axis=0) == 0:
+                deleteSet.add(gene)
+        set2nd = {g for g in list2nd if g not in deleteSet}
+        #--- END NEW
         count = 0
         num1stSet, num2ndSet = len(set1st), len(set2nd)
         for genePair in itertools.product(set1st, set2nd):
@@ -255,7 +273,7 @@ def interaction_stats(interactPairs, id2set):
     return results
 
 
-def get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs):
+def get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs, gene2idx, adjMat):
     """Write network input file for visualization
     INPUTS:
         1.) <dict> {(gene ID1, gene ID2): LLS}
@@ -272,7 +290,25 @@ def get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs):
             print(set1st)  # CHECKING
             print('Genes in 2nd set:')  # CHECKING
             print(set2nd)  # CHECKING
-            print()
+            print()  # CHECKING
+            #--- BEGIN NEW
+            list1st = list(set1st - set2nd)
+            list2nd = list(set2nd - set1st)
+            deleteSet = set()
+            for i in range(len(list1st) - 1):
+                gene = list1st[i]
+                partners = [gene2idx[g] for g in list1st[i+1:]]
+                if np.sum(adjMat[gene2idx[gene], partners], axis=0) == 0:
+                    deleteSet.add(gene)
+            set1st = {g for g in list1st if g not in deleteSet}
+            deleteSet = set()
+            for i in range(len(list2nd) - 1):
+                gene = list2nd[i]
+                partners = [gene2idx[g] for g in list2nd[i+1:]]
+                if np.sum(adjMat[gene2idx[gene], partners], axis=0) == 0:
+                    deleteSet.add(gene)
+            set2nd = {g for g in list2nd if g not in deleteSet}
+            #--- END NEW
             for genePair in itertools.product(set1st, set2nd):
                 if genePair in intactPairs:
                     edges.append((genePair[0], genePair[1], -1))
@@ -381,7 +417,7 @@ def main():
     combinedSets = combine_sets(setOfSets)
     id2set = {i: fs for i,fs in enumerate(combinedSets)}
 
-    results = interaction_stats(intactPairs, id2set)
+    results = interaction_stats(intactPairs, id2set, gene2idx, adjMat)
     print('Number of set pairs:', len(results), '\n')
 
     pvals = np.array([results[k][3] for k in results.keys()])
@@ -395,7 +431,7 @@ def main():
     else:
         pvalCutoff = pvalsSig[numExam - 1]
 
-    edges = get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs)
+    edges = get_graph_edges(node2edgewt, pvalCutoff, results, id2set, intactPairs, gene2idx, adjMat)
     plot_network(edges, experimentSys, organism)
 
     writeToJSON = 0
