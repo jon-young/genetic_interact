@@ -16,14 +16,12 @@ HARD-CODED PARAMETERS:
     4.) columns in BIOGRID file to read
     5.) AUC upper and lower limits for predictability
     6.) # of cluster pairs for network visualization
-    7.) write to JSON
 """
 
 import bisect
 import collections
 import csv
 import itertools
-import json
 import math
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -32,10 +30,11 @@ import os
 import pandas as pd
 import pyuserfcn
 import random
+import readline
 import scipy.special
 import scipy.stats as stats
 import sys
-from networkx.readwrite import json_graph
+from rpy2.robjects import r
 from statsmodels.sandbox.stats.multicomp import fdrcorrection0
 from sklearn import metrics
 
@@ -295,7 +294,7 @@ def interaction_stats_2(seeds, seed2intacts, id2set, gene2idx, adjMat):
             intactDf.loc[s,i] = 1
             intactDf.loc[i,s] = 1
 
-    numRand = 100
+    numRand = 10000
     scores = dict()
     for idPair in itertools.combinations(id2set.keys(), 2):
         set1st = id2set[idPair[0]]
@@ -508,27 +507,6 @@ def plot_1_network(pair2pval, pvalCutoff, id2set, gene2idx, adjMat, intactPairs,
             plt.close()
 
 
-def write_json(edges, experimentSys, organism):
-    """Write network to JSON format for visualization with D3.js
-    INPUT: 
-        1.) <list> [(node, node, edge weight)]
-        2.) <string> genetic interaction type
-        3.) <string> organism"""
-    G = nx.Graph()
-    for e in edges:
-        if e[2] < 0:
-            G.add_edge(e[0], e[1], weight=0.5, style='dashed')
-        else:
-            G.add_edge(e[0], e[1], weight=e[2], style='solid')
-    weights = [G[u][v]['weight'] for u,v in G.edges()]
-    styles = [G[u][v]['style'] for u,v in G.edges()]
-    for n in G:
-        G.node[n]['name'] = n
-    d = json_graph.node_link_data(G)  # node-link format to serialize
-    writeFile = organism + ''.join(experimentSys.split(' ')) + '.json'
-    json.dump(d, open(os.path.join('..', 'd3', writeFile), 'w'))
-
-
 def main():
     experimentSys = sys.argv[1]
     organism = sys.argv[2].strip().lower()
@@ -581,25 +559,15 @@ def main():
     print('Number of set pairs:', len(pvals), '\n')
 
     # multiple hypothesis correction
-    p_values = np.array(list(pvals.values()))
-    rejected, pvalsCor = fdrcorrection0(p_values, alpha=0.10)
-    numSig = np.sum(rejected)
-    print('Number of significant interacting pairs (10% FDR):', numSig, '\n')
-    minpval = np.sort(p_values)[0]
-    print('Minimum p-value =', minpval, '\n')
-    plt.hist(p_values, bins=math.sqrt(p_values.size), log=True)
-    plt.xlabel('p-value')
-    plt.ylabel('Count')
-    plt.title(experimentSys)
-    plt.show()
-    
+    p_values = [str(p) for p in sorted(pvals.values())]
+    r('library(qvalue)')
+    vecstr = 'c(' + ','.join(p_values) + ')'
+    r('qobj <- qvalue(' + vecstr + ', pi0.meth="bootstrap", fdr.level=0.1)')
+    r('write.qvalue(qobj, file="../tmp/qvalsNegativeGenetic-1e4iter.txt")')
+
     ##edges = net_edges(node2edgewt, pvals, id2set, intactPairs, gene2idx, adjMat)
     ##plot_network(edges, experimentSys, organism)
-    plot_1_network(pvals, minpval, id2set, gene2idx, adjMat, intactPairs, node2edgewt, experimentSys, organism)
-
-    writeToJSON = 0
-    if writeToJSON:
-        write_json(edges, experimentSys, organism)
+    ##plot_1_network(pvals, minpval, id2set, gene2idx, adjMat, intactPairs, node2edgewt, experimentSys, organism)
 
 
 if __name__=="__main__":
