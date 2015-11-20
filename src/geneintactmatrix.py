@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 
 """
+Construct genetic interaction adjacency matrix
+
 Created: 03 November 2015
 """
 
 import numpy as np
 import os.path
-import sys
 
 
 def setup_filepaths():
@@ -25,7 +26,7 @@ def setup_filepaths():
     ScProtFile = os.path.join('..', '..', 'DataProcessed', 
             'Sc_prot_cmplx_Hart2007.txt')
     SpProtFile = os.path.join('..', '..', 'DataProcessed', 
-            'Sp_prot_cmplx_Ryan2013.txt')
+            'Sp_prot_cmplx_Ryan2013.2col.txt')
     DmProtFile = ''
     HsProtFile = ''
     
@@ -59,7 +60,9 @@ def get_all_genes(files):
             allGenes.update(line.split('\t')[:2])
     else:  # functional net not available
         for line in open(files[0]):  # process genetic interactions
-            allGenes.update(line.split('\t')[7:9])
+            tokens = line.rstrip().split('\t')
+            if tokens[12] == 'genetic':
+                allGenes.update(tokens[5:7])
 
         for line in open(files[1]):  # process protein complexes
             allGenes.add(line.rstrip().split('\t')[1])
@@ -67,43 +70,24 @@ def get_all_genes(files):
     return allGenes
 
 
-def GI_matrix(intactType, filename, genes):
+def make_adj(organism, intactType):
     """Construct adjacency matrix for genetic interaction network of given 
     organism and type"""
+    org2path = setup_filepaths()
+    
+    genes = get_all_genes(org2path[organism])
+    
     sortedGenes = sorted(genes)
     gene2idx = {g:i for i,g in enumerate(sortedGenes)}
     adjMat = np.zeros((len(genes), len(genes)), dtype=np.int)
 
-    for line in open(filename):
+    geneIntactFile = org2path[organism][0]
+    for line in open(geneIntactFile):
         tokens = line.rstrip().split('\t')
         if tokens[11] == intactType:
-            i = gene2idx[tokens[7]]
-            j = gene2idx[tokens[8]]
+            i, j = gene2idx[tokens[5]], gene2idx[tokens[6]]
             adjMat[i,j] = 1
             adjMat[j,i] = 1
 
     return adjMat, gene2idx
-
-
-def main():
-    """NOTES: protein complexes have been already pre-processed into 
-    common-format files"""
-    print('\nChoose from the following organisms (enter species name):')
-    print('1. cerevisiae')
-    print('2. pombe')
-    print('3. melanogaster')
-    print('4. sapiens')
-    organism = input()
-    intactType = input('\nEnter desired genetic interaction type:\n')
-    
-    org2path = setup_filepaths()
-
-    allGenes = get_all_genes(org2path[organism])
-    print('Number of genes in adjacency matrix:', len(allGenes))
-    
-    adjMat, gene2idx = GI_matrix(intactType, org2path[organism][0], allGenes)
-
-
-if __name__=="__main__":
-    main()
 
