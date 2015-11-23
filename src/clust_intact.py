@@ -9,17 +9,21 @@ import bisect
 import itertools
 import numpy as np
 import os.path
+import scipy.special
+import scipy.stats as stats
 import geneintactmatrix
 import genesets
 
 
-def setup_filepaths(clustType, organism):
+def setup_filepaths():
     """Establish full paths for input gene set file"""
     if clustType == 'protein complexes':
         if organism == 'cerevisiae':
-            filepath = os.path.join('..', '..', 'DataProcessed', 'Sc_prot_cmplx_Hart2007.txt')
+            filepath = os.path.join('..', '..', 'DataProcessed', 
+                    'Sc_prot_cmplx_Hart2007.txt')
         elif organism == 'pombe':
-            filepath = os.path.join('..', '..', 'DataProcessed', 'Sp_prot_cmplx_Ryan2013.txt')
+            filepath = os.path.join('..', '..', 'DataProcessed', 
+                    'Sp_prot_cmplx_Ryan2013.2col.txt')
         else:
             filepath = ''
     else:  # clusters from functional net
@@ -31,50 +35,41 @@ def setup_filepaths(clustType, organism):
     return filepath
 
 
-def between_interact_stats(clust2genes, adjMat, gene2idx):
-    """Calculate significane of interactions between clusters"""
-    genes = list(gene2idx.keys())    
-    NUMRAND = 10000
-    scores = dict()
+def btw_interact_binom():
+    """Calculate cluster interaction from binomial probability"""
+    numGenes = len(geneintactmatrix.get_biogrid_genes(organism, intactType))
+    p = (np.sum(adjMat)/2)/scipy.special.binom(numGenes, 2)
     
-    for clustPair in itertools.combinations(clust2genes.keys(), 2):
-        allRandCounts = list()        
-        # randomization
-        for n in range(NUMRAND):
-            shufdict = dict(zip(np.random.permutation(genes), gene2idx.values()))
-            randIdx1 = [shufdict[g] for g in clust2genes[clustPair[0]]]
-            randIdx2 = [shufdict[g] for g in clust2genes[clustPair[1]]]
-            allRandCounts.append(np.sum(adjMat[np.ix_(randIdx1, randIdx2)]))
-        allRandCounts.sort()
+    results = list()
+    for pair in itertools.combinations(clust2genes.keys(), 2):
+        numClust1 = len(clust2genes[pair[0]])
+        numClust2 = len(clust2genes[pair[1]])
         
-        # calculate actual counts
-        clustIdx1 = [gene2idx[g] for g in clust2genes[clustPair[0]]]
-        clustIdx2 = [gene2idx[g] for g in clust2genes[clustPair[1]]]
-        actualCount = np.sum(adjMat[np.ix_(clustIdx1, clustIdx2)])
-        
-        rank = bisect.bisect_left(allRandCounts, actualCount)
-        scores[clustPair] = (NUMRAND - rank + 1)/(NUMRAND + 1)
-    
-    return scores
+        # compute interaction counts
+        clustIdx1 = [gene2idx[g] for g in clust2genes[pair[0]]]
+        clustIdx2 = [gene2idx[g] for g in clust2genes[pair[1]]]
+        count = np.sum(adjMat[np.ix_(clustIdx1, clustIdx2)])
+
+        n = numClust1 * numClust2
+        pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
+        results.append((pair, pval))
+
+    return results
 
 
-def main():
-    print('\nChoose from the following organisms (enter species name):')
-    print('1) cerevisiae')
-    print('2) pombe')
-    print('3) melanogaster')
-    print('4) sapiens')
-    organism = input()
-    clustType = input('\nUse "functional net" or "protein complexes" for clusters?\n')
+print('\nChoose from the following organisms (enter species name):')
+print('1) cerevisiae')
+print('2) pombe')
+print('3) melanogaster')
+print('4) sapiens')
+organism = input()
+clustType = input('\nUse "functional net" or "protein complexes" for clusters?\n')
 
-    clustFile = setup_filepaths(clustType, organism)
-    clust2genes = genesets.process_file(clustFile)
-    
-    intactType = input('Enter type of genetic interaction:\n')
-    adjMat, gene2idx = geneintactmatrix.make_adj(organism, intactType)
-    
-    pvals = between_interact_stats(clust2genes, adjMat, gene2idx)
+clustFile = setup_filepaths()
+clust2genes = genesets.process_file(clustFile)
 
+intactType = input('Enter type of genetic interaction:\n')
+adjMat, gene2idx = geneintactmatrix.make_adj(organism, intactType)
 
-if __name__=="__main__":
-    main()
+results = btw_interact_binom()
+
