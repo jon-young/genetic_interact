@@ -11,6 +11,7 @@ import numpy as np
 import os.path
 import scipy.special
 import scipy.stats as stats
+from statsmodels.sandbox.stats.multicomp import fdrcorrection0
 import geneintactmatrix
 import genesets
 
@@ -39,9 +40,10 @@ def btw_interact_binom():
     """Calculate cluster interaction from binomial probability"""
     numGenes = len(geneintactmatrix.get_biogrid_genes(organism, intactType))
     p = (np.sum(adjMat)/2)/scipy.special.binom(numGenes, 2)
+    print('\nThe background probability is', p)
     
     results = list()
-    for pair in itertools.combinations(clust2genes.keys(), 2):
+    for i, pair in enumerate(itertools.combinations(clust2genes.keys(), 2)):
         numClust1 = len(clust2genes[pair[0]])
         numClust2 = len(clust2genes[pair[1]])
         
@@ -53,6 +55,7 @@ def btw_interact_binom():
         n = numClust1 * numClust2
         pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
         results.append((pair, pval))
+    print('\nExamined', i+1, 'cluster pairs.')
 
     return results
 
@@ -67,9 +70,15 @@ clustType = input('\nUse "functional net" or "protein complexes" for clusters?\n
 
 clustFile = setup_filepaths()
 clust2genes = genesets.process_file(clustFile)
+print('\nRead', len(clust2genes), 'clusters.')
 
-intactType = input('Enter type of genetic interaction:\n')
+intactType = input('\nEnter type of genetic interaction:\n')
 adjMat, gene2idx = geneintactmatrix.make_adj(organism, intactType)
 
-results = btw_interact_binom()
+results = sorted(btw_interact_binom(), key=lambda f: f[1])
+
+pvals = [t[1] for t in results]
+rejected, pvalsCor = fdrcorrection0(pvals, is_sorted=True)
+print('\nNumber of significant p-values (5% FDR, Benjamini-Hochberg):', 
+        np.sum(rejected), '\n')
 
