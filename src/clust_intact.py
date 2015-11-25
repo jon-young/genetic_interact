@@ -12,6 +12,7 @@ import os.path
 import scipy.special
 import scipy.stats as stats
 from statsmodels.sandbox.stats.multicomp import fdrcorrection0
+import biogrid
 import geneintactmatrix
 import genesets
 
@@ -37,25 +38,38 @@ def setup_filepaths():
 
 
 def btw_interact_binom():
-    """Calculate cluster interaction from binomial probability"""
-    numGenes = len(geneintactmatrix.get_biogrid_genes(organism, intactType))
-    p = (np.sum(adjMat)/2)/scipy.special.binom(numGenes, 2)
+    """Calculate between-cluster interaction from binomial probability"""
+    numGenes = len(biogrid.get_biogrid_genes(organism, intactType))
+    p = len(intactSet)/scipy.special.binom(numGenes, 2)
     print('\nThe background probability is', p)
     
     results = list()
     for i, pair in enumerate(itertools.combinations(clust2genes.keys(), 2)):
-        numClust1 = len(clust2genes[pair[0]])
-        numClust2 = len(clust2genes[pair[1]])
-        
-        # compute interaction counts
-        clustIdx1 = [gene2idx[g] for g in clust2genes[pair[0]]]
-        clustIdx2 = [gene2idx[g] for g in clust2genes[pair[1]]]
-        count = np.sum(adjMat[np.ix_(clustIdx1, clustIdx2)])
-
-        n = numClust1 * numClust2
+        geneset0 = clust2genes[pair[0]]
+        geneset1 = clust2genes[pair[1]]
+        count = sum(1 for genePair in itertools.product(geneset0, geneset1) 
+                if frozenset(genePair) in intactSet)
+        n = len(geneset0) * len(geneset1)
         pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
         results.append((pair, pval))
     print('\nExamined', i+1, 'cluster pairs.')
+
+    return results
+
+
+def within_interact_binom():
+    """Compute within-cluster interaction from binomial probability"""
+    numGenes = len(biogrid.get_biogrid_genes(organism, intactType))
+    p = len(intactSet)/scipy.special.binom(numGenes, 2)
+    print('\nThe background probability is', p)
+    
+    results = list()
+    for c in clust2genes.keys():
+        count = sum(1 for genePair in itertools.combinations(clust2genes[c], 2) 
+                if frozenset(genePair) in intactSet)
+        n = len(clust2genes[c])
+        pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
+        results.append((c, pval))
 
     return results
 
@@ -73,7 +87,7 @@ clust2genes = genesets.process_file(clustFile)
 print('\nRead', len(clust2genes), 'clusters.')
 
 intactType = input('\nEnter type of genetic interaction:\n')
-adjMat, gene2idx = geneintactmatrix.make_adj(organism, intactType)
+intactSet = biogrid.get_interacting_genes(organism, intactType)
 
 results = sorted(btw_interact_binom(), key=lambda f: f[1])
 
