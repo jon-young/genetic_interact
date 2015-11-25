@@ -85,24 +85,9 @@ def make_adj(organism, intactType):
     for line in open(geneIntactFile):
         tokens = line.rstrip().split('\t')
         if tokens[11] == intactType:
-            i, j = gene2idx[tokens[5]], gene2idx[tokens[6]]
+            i, j = gene2idx[tokens[7]], gene2idx[tokens[8]]
             adjMat[i,j] = 1
             adjMat[j,i] = 1
 
     return adjMat, gene2idx
-
-
-def get_biogrid_genes(organism, intactType):
-    """Return genes from BIOGRID for a given interaction type.
-    WARNING: GENE COLUMNS HARD-CODED"""
-    org2path = setup_filepaths()
-
-    intactGenes = set()
-    geneIntactFile = org2path[organism][0]
-    for line in open(geneIntactFile):
-        tokens = line.rstrip().split('\t')
-        if tokens[11] == intactType:
-            intactGenes.update(tokens[5:7])
-
-    return intactGenes
 
