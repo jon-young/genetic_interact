@@ -32,19 +32,12 @@ def setup_filepaths():
                 'H6Net_CC.net')
     elif organism == 'melanogaster':
         biogridpath = os.path.join('..', 'data', 'BIOGRID-3.4.127-fly.txt')
-        fnetpath = os.path.join('..', 'data', 'FlyNetEntrez-noNull.txt')
+        fnetpath = os.path.join('..', 'data', 'FlyNetDataFrame.pkl')
     else:
         print('ORGANISM NOT FOUND! Exiting...')
         sys.exit()
 
     return biogridpath, fnetpath
-
-
-def get_fnet():
-    """Construct adjacency matrix of functional network"""
-    G = nx.read_weighted_edgelist(fnetpath, delimiter='\t')
-    
-    return nx.to_pandas_dataframe(G)
 
 
 class Biogrid:
@@ -82,10 +75,12 @@ class Biogrid:
 
 
 class NavPlot:
-    def __init__(self, df, biogrid):
+    def __init__(self, fig, df, biogrid):
         self.func = df
         self.seedAUC = biogrid.seedAUC
         self.seed2interactors = biogrid.seed2interactors
+        self.fig = fig
+        self.ax = fig.add_subplot(111)
         print('\nTo choose which predictive functional net clusters to draw,')
         lowLim = float(input('enter the AUC lower limit: '))
         upLim = float(input('Enter the AUC upper limit: '))
@@ -100,27 +95,23 @@ class NavPlot:
             sys.exit()
         self.pos = 0
         self.llsCut = float(input('Enter a cutoff for the LLS: '))
-        self.fig = plt.figure()
-        self.fig.canvas.mpl_connect('key_press_event', self.onpress)
         self.draw_net()
 
     def draw_net(self):
+        plt.cla()
         seedGene = self.seedAUC[self.idxs[self.pos]][1]
         interactors = self.seed2interactors[seedGene]
         subnet = self.func[interactors].copy()
         edges = list(subnet[subnet > self.llsCut].stack().index)
         G = nx.Graph()
         G.add_edges_from(edges)
-        pos_ = nx.spring_layout(G)
-        plt.cla()
+        pos_ = nx.spring_layout(G, k=0.15, scale=6.0)
         colored = set(itertools.chain.from_iterable(edges)) & set(interactors)
-        nx.draw_networkx(G, pos=pos_, nodelist=list(colored), node_color='c')
+        nx.draw(G, pos=pos_, nodelist=list(colored), node_size=50, node_color='c')
         otherNodes = list(set(G.nodes()) - colored)
-        nx.draw_networkx(G, pos=pos_, nodelist=otherNodes, node_color='w')
-        plt.title('AUC = %f' %self.seedAUC[self.idxs[self.pos]][0])
-        plt.axis('off')
+        nx.draw(G, pos=pos_, nodelist=otherNodes, node_size=50, node_color='w')
+        self.ax.set_title('AUC = %f' %self.seedAUC[self.idxs[self.pos]][0])
         self.fig.canvas.draw()
-        plt.show()
 
     def onpress(self, event):
         end = len(self.idxs) - 1
@@ -139,9 +130,14 @@ print('2) sapiens')
 print('3) melanogaster')
 organism = input()
 biogridpath, fnetpath = setup_filepaths()
+
 print('\nReading in functional gene network...')
-funcNetDf = get_fnet()
+funcNetDf = pd.read_pickle(fnetpath)
 biogrid = Biogrid(funcNetDf)
 biogrid.seed_set_predictability()
-NavPlot(funcNetDf, biogrid)
+
+fig = plt.figure(figsize=(10,8))
+interactive = NavPlot(fig, funcNetDf, biogrid)
+fig.canvas.mpl_connect('key_press_event', interactive.onpress)
+plt.show()
 
