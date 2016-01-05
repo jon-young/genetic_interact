@@ -12,6 +12,7 @@ import collections
 import itertools
 import math
 import matplotlib.pyplot as plt
+import mygene
 import networkx as nx
 import numpy as np
 import os.path
@@ -96,6 +97,7 @@ class NavPlot:
             sys.exit()
         self.pos = 0
         self.llsCut = float(input('Enter a cutoff for the LLS: '))
+        self.mg = mygene.MyGeneInfo()
         self.draw_net()
 
     def draw_net(self):
@@ -113,12 +115,21 @@ class NavPlot:
                 node_color='c')
         otherNodes = list(set(G.nodes()) - colored)
         nx.draw_networkx_nodes(G, pos=pos_, nodelist=otherNodes, node_size=30, 
-                node_color='w', alpha=0.5)
-        nx.draw_networkx_edges(G, pos=pos_, alpha=0.5)
-        labels_ = {g:g for g in colored}
-        nx.draw_networkx_labels(G, pos=pos_, labels=labels_)
+                node_color='w', alpha=0.25)
+        nx.draw_networkx_edges(G, pos=pos_, alpha=0.25)
+        try:
+            labels_ = {g:self.mg.getgene(g)['name'] for g in colored}
+        except:
+            labels_ = {g:g for g in colored}
+        nx.draw_networkx_labels(G, pos=pos_, labels=labels_, font_size=8, 
+                font_color='b')
         AUC = self.seedAUC[self.idxs[self.pos]][0]
-        self.ax.set_title('Seed gene {}, AUC = {:.3f}'.format(seedGene, AUC))
+        try:
+            seedName = self.mg.getgene(seedGene)['name']
+        except:
+            seedName = seedGene
+        self.ax.set_title('Seed gene: {}; AUC = {:.3f}'.format(seedName, AUC))
+        plt.axis('off')
         self.fig.canvas.draw()
 
     def onpress(self, event):
@@ -145,7 +156,7 @@ funcNetDf = pd.read_pickle(fnetpath)
 biogrid = Biogrid(funcNetDf)
 biogrid.seed_set_predictability()
 
-fig = plt.figure(figsize=(18,12))
+fig = plt.figure(figsize=(12,8))
 interactive = NavPlot(fig, funcNetDf, biogrid)
 fig.canvas.mpl_connect('key_press_event', interactive.onpress)
 plt.tight_layout()
