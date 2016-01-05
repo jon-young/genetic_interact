@@ -10,6 +10,7 @@ Created: 26 December 2015
 import bisect
 import collections
 import itertools
+import math
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -105,23 +106,31 @@ class NavPlot:
         edges = list(subnet[subnet > self.llsCut].stack().index)
         G = nx.Graph()
         G.add_edges_from(edges)
-        pos_ = nx.spring_layout(G, k=0.15, scale=6.0)
+        nodedist = 1.5/math.sqrt(nx.number_of_nodes(G))
+        pos_ = nx.spring_layout(G, k=nodedist, scale=12.0)
         colored = set(itertools.chain.from_iterable(edges)) & set(interactors)
-        nx.draw(G, pos=pos_, nodelist=list(colored), node_size=50, node_color='c')
+        nx.draw_networkx_nodes(G, pos=pos_, nodelist=list(colored), node_size=0, 
+                node_color='c')
         otherNodes = list(set(G.nodes()) - colored)
-        nx.draw(G, pos=pos_, nodelist=otherNodes, node_size=50, node_color='w')
-        self.ax.set_title('AUC = %f' %self.seedAUC[self.idxs[self.pos]][0])
+        nx.draw_networkx_nodes(G, pos=pos_, nodelist=otherNodes, node_size=30, 
+                node_color='w', alpha=0.5)
+        nx.draw_networkx_edges(G, pos=pos_, alpha=0.5)
+        labels_ = {g:g for g in colored}
+        nx.draw_networkx_labels(G, pos=pos_, labels=labels_)
+        AUC = self.seedAUC[self.idxs[self.pos]][0]
+        self.ax.set_title('Seed gene {}, AUC = {:.3f}'.format(seedGene, AUC))
         self.fig.canvas.draw()
 
     def onpress(self, event):
         end = len(self.idxs) - 1
         if event.key == 'up':
             self.pos = np.clip(self.pos + 1, 0, end)
+            self.draw_net()
         elif event.key == 'down':
             self.pos = np.clip(self.pos - 1, 0, end)
+            self.draw_net()
         else:
             pass
-        self.draw_net()
 
 
 print('\nChoose from the following organisms (enter species name):')
@@ -136,8 +145,9 @@ funcNetDf = pd.read_pickle(fnetpath)
 biogrid = Biogrid(funcNetDf)
 biogrid.seed_set_predictability()
 
-fig = plt.figure(figsize=(10,8))
+fig = plt.figure(figsize=(18,12))
 interactive = NavPlot(fig, funcNetDf, biogrid)
 fig.canvas.mpl_connect('key_press_event', interactive.onpress)
+plt.tight_layout()
 plt.show()
 
