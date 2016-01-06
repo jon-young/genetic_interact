@@ -11,9 +11,9 @@ import numpy as np
 import os.path
 import scipy.special
 import scipy.stats as stats
+import sys
 from statsmodels.sandbox.stats.multicomp import fdrcorrection0
 import biogrid
-import geneintactmatrix
 import genesets
 
 
@@ -26,13 +26,18 @@ def setup_filepaths():
         elif organism == 'pombe':
             filepath = os.path.join('..', '..', 'DataProcessed', 
                     'Sp_prot_cmplx_Ryan2013.2col.txt')
+        elif organism == 'sapiens':
+            filepath = os.path.join('..', '..', 'DataProcessed', 
+                    'CORUM_Human_Entrez.txt')
         else:
-            filepath = ''
+            print('\nORGANISM NOT FOUND. EXITING...\n')
+            sys.exit()
     else:  # clusters from functional net
         if organism == 'cerevisiae':
             filepath = ''
         else:
-            filepath = ''
+            print('\nORGANISM NOT FOUND. EXITING...\n')
+            sys.exit()
     
     return filepath
 
@@ -67,7 +72,7 @@ def within_interact_binom():
     for c in clust2genes.keys():
         count = sum(1 for genePair in itertools.combinations(clust2genes[c], 2) 
                 if frozenset(genePair) in intactSet)
-        n = len(clust2genes[c])
+        n = scipy.special.binom(len(clust2genes[c]), 2)
         pval = stats.binom.pmf(count, n, p) + stats.binom.sf(count, n, p)
         results.append((c, pval))
 
@@ -89,7 +94,8 @@ print('\nRead', len(clust2genes), 'clusters.')
 intactType = input('\nEnter type of genetic interaction:\n')
 intactSet = biogrid.get_interacting_genes(organism, intactType)
 
-results = sorted(btw_interact_binom(), key=lambda f: f[1])
+print('\nComputing WITHIN-cluster interactions...')
+results = sorted(within_interact_binom(), key=lambda f: f[1])
 
 pvals = [t[1] for t in results]
 rejected, pvalsCor = fdrcorrection0(pvals, is_sorted=True)
