@@ -131,10 +131,11 @@ def main():
     bkgrdPr = get_background_probability(organism, intactType, intactSet)
     
     # NOTE: Background probability to be determined before sparsity withholding
-    print('\nEvaluate effect of genetic interaction sparsity? [Y/n]')
-    sparsAns = input()
+    sparsAns = input('\nEvaluate effect of genetic interaction sparsity?' \
+            ' [Y/n] ')
     if sparsAns == 'Y':
-        print('Enter the percent of genetically interacting pairs to withhold:')
+        print('\nEnter the percent of genetically interacting pairs to '\
+                'withhold:')
         pctWithheld = int(input())
         intactSet = sparsity_withhold(intactSet, pctWithheld)
     else:
