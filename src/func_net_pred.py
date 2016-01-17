@@ -24,15 +24,16 @@ import sys
 from sklearn import metrics
 
 
-def process_func_net():
+def process_func_net(netwkFile):
     """Get nodes and edge weights of functional net and store in dictionary
     RETURNS:
         <dict> {(gene ID1, gene ID2): LLS}
     """
     node2edgewt = dict()
-    netwk = '/work/jyoung/DataDownload/FunctionalNet/yeastnet2.gene.txt'
+    #netwkDir = os.path.join('..', '..', 'DataDownload', 'FunctionalNet', '')
+    netwkDir = os.path.join('..', 'data', '')
     scoreCol = 2
-    for line in open(netwk):
+    for line in open(netwkDir + netwkFile):
         tokens = line.split('\t')
         node2edgewt[(tokens[0], tokens[1])] = float(tokens[scoreCol])
     return node2edgewt
@@ -83,7 +84,7 @@ def read_known_interact(filePath):
     return seedSets
 
 
-def read_biogrid(experimentSys):
+def read_biogrid(experimentSys, filename):
     """Read BIOGRID genetic interactions and return dictionary converting each 
     interactor ID to its genetic interaction partners
     NOTE: the correct column numbers need to be specified beforehand: 1 & 2 
@@ -95,14 +96,14 @@ def read_biogrid(experimentSys):
     """
     seedSets = collections.defaultdict(set)
     allGenes = set()
-    filepath = os.path.join('..', 'data', 'BIOGRID-3.4.127-for-yeastnetv2.txt')
+    fileDir = os.path.join('..', 'data', '')
     experimentalSysColNum = 11
-    for line in open(filepath):
+    for line in open(fileDir + filename):
         tokens = line.split('\t')
         if tokens[experimentalSysColNum] == experimentSys:
-            seedSets[tokens[7]].add(tokens[8])
-            seedSets[tokens[8]].add(tokens[7])
-            allGenes.update([tokens[7], tokens[8]])
+            seedSets[tokens[1]].add(tokens[2])
+            seedSets[tokens[2]].add(tokens[1])
+            allGenes.update([tokens[1], tokens[2]])
     print('Number of genes in interactions:', len(allGenes))
     return seedSets
 
@@ -219,6 +220,8 @@ def eval_time_split_pred(typeForEval, gene2idx, adjMat, seedSets):
     y_score_all = list()
     gene2tested, interactPairs = read_SGA(typeForEval)
     idx2gene = pyuserfcn.invert_dict(gene2idx)
+    numCols = adjMat.shape[1]
+    predAucCut = 0.0
     for seedGene in seedSets.keys():
         # check if seed gene in network and if included in SGA
         if seedGene in gene2idx and seedGene in gene2tested:
@@ -226,23 +229,27 @@ def eval_time_split_pred(typeForEval, gene2idx, adjMat, seedSets):
             seedIdx = [gene2idx[i] for i in interactors if i in gene2idx]
             if len(seedIdx) > 0:
                 llsSum = np.sum(adjMat[seedIdx, :], axis=0)
-                # now make true/false calls on interactions
-                y_true = list()
-                y_score = list()
-                for i in range(len(llsSum)):
-                    interactorGene = idx2gene[i]
-                    if interactorGene in interactors:  # ignore if used to predict
-                        pass
-                    elif interactorGene in gene2tested[seedGene]:
-                        if {seedGene, interactorGene} in interactPairs:
-                            y_true.append(1)
-                        else:
-                            y_true.append(0)
-                        y_score.append(llsSum[i])
-                    else:  # not tested in SGA
-                        pass
-                y_true_all.extend(y_true)
-                y_score_all.extend(y_score)
+                trueLabels = np.zeros(numCols, dtype=np.int)
+                trueLabels[seedIdx] = 1
+                predAuc = metrics.roc_auc_score(trueLabels, llsSum)
+                if predAuc >= predAucCut:
+                    # now make true/false calls on interactions
+                    y_true = list()
+                    y_score = list()
+                    for i in range(len(llsSum)):
+                        interactorGene = idx2gene[i]
+                        if interactorGene in interactors:
+                            pass  # ignore if used to predict
+                        elif interactorGene in gene2tested[seedGene]:
+                            if {seedGene, interactorGene} in interactPairs:
+                                y_true.append(1)
+                            else:
+                                y_true.append(0)
+                            y_score.append(llsSum[i])
+                        else:  # not tested in SGA
+                            pass
+                    y_true_all.extend(y_true)
+                    y_score_all.extend(y_score)
     y_true_all = np.array(y_true_all)
     y_score_all = np.array(y_score_all)
     # test y_true_all and y_score_all are same size
@@ -278,7 +285,21 @@ def eval_time_split_pred(typeForEval, gene2idx, adjMat, seedSets):
 
 def main():
     experimentSys = sys.argv[1]
-    node2edgewt = process_func_net()
+    organism = sys.argv[2].strip().lower()
+    org2files = {'human': ('H6Net_CC.net', 
+                           'HumanNet2_adj_matrix.npy', 
+                           'BIOGRID-3.4.127-human.txt'),
+                 'yeast': ('yeastnet2.gene.txt', 
+                           'YeastNet2_adj_matrix.npy', 
+                           'BIOGRID-3.4.127-for_yeastnetv2.txt')}
+    if organism not in org2files:
+        print('Organism not found.')
+        print('Available organisms: human, yeast\n')
+        sys.exit()
+    netwkFile = org2files[organism][0]
+    matrixFile = org2files[organism][1]
+    biogridFile = org2files[organism][2]
+    node2edgewt = process_func_net(netwkFile)
     gene2idx = assign_gene_indices(node2edgewt)
     print('\nNumber of genes in functional network:', len(gene2idx.keys()), '\n')
     matrixPath = os.path.join('..', 'data', 'YeastNet2_adj_matrix.npy')
@@ -288,7 +309,7 @@ def main():
         print('Network file not found. Creating network matrix...\n')
         adjMat = build_netwk_adj_matrix(node2edgewt, gene2idx)
         np.save(matrixPath, adjMat)
-    ##seedSets = read_biogrid(experimentSys)
+    ##seedSets = read_biogrid(experimentSys, biogridFile)
     ##seedAUC, seed2intacts = seed_set_predictability(gene2idx, adjMat, seedSets)
     ##plot_aucs(seedAUC, experimentSys)
     CONVERSFLAG = 0
@@ -304,13 +325,17 @@ def main():
     fileSuffix = '-' + ''.join(experimentSys.split()) + '.txt'
     incl0709file = 'incl0709' + fileSuffix
     incl0709 = read_known_interact(dataFolder + incl0709file)
-    typeForEval = experimentSys.split()[0].lower()
-    if typeForEval == 'negative' or typeForEval == 'positive':
-        eval_time_split_pred(typeForEval, gene2idx, adjMat, incl0709)
+    if organism == 'yeast':
+        typeForEval = experimentSys.split()[0].lower()
+        if typeForEval == 'negative' or typeForEval == 'positive':
+            eval_time_split_pred(typeForEval, gene2idx, adjMat, incl0709)
+        else:
+            print('Interaction type for prediction performance evaluation') 
+            print('must be either "Negative Genetic" or "Positive Genetic."')
+            print('No validation performed. Exiting...\n')
+            sys.exit()
     else:
-        print('Interaction type for prediction performance evaluation') 
-        print('must be either "Negative Genetic" or "Positive Genetic."')
-        print('No validation performed. Exiting...\n')
+        print('For validation, organism must be yeast. Exiting...\n')
         sys.exit()
 
 
