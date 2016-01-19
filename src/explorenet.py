@@ -26,20 +26,48 @@ def setup_filepaths():
     if organism == 'cerevisiae':
         biogridpath = os.path.join('..', 'data', 
                 'BIOGRID-3.4.130-yeast-post2006.txt')
-        fnetpath = os.path.join('..', '..', 'DataDownload', 'FunctionalNet', 
-                'yeastnet2.gene.txt')
+        fnetpath = os.path.join('..', 'data', 'YeastNetDataFrame.pkl')
     elif organism == 'sapiens':
-        biogridpath = os.path.join('..', 'data', 'BIOGRID-3.4.130-human.txt')
-        fnetpath = os.path.join('..', '..', 'DataDownload', 'FunctionalNet', 
-                'H6Net_CC.net')
+        biogridpath = os.path.join('..', '..', 'DataDownload', 'BIOGRID', 
+                'BIOGRID-ORGANISM-3.4.130.tab2', 
+                'BIOGRID-ORGANISM-Homo_sapiens-3.4.130.tab2.txt')
+        fnetpath = os.path.join('..', 'data', 'HumanNetDataFrame.pkl')
     elif organism == 'melanogaster':
-        biogridpath = os.path.join('..', 'data', 'BIOGRID-3.4.127-fly.txt')
+        biogridpath = os.path.join('..', '..', 'DataDownload', 'BIOGRID', 
+                'BIOGRID-ORGANISM-3.4.130.tab2', 
+                'BIOGRID-ORGANISM-Drosophila_melanogaster-3.4.130.tab2.txt')
         fnetpath = os.path.join('..', 'data', 'FlyNetDataFrame.pkl')
     else:
         print('ORGANISM NOT FOUND! Exiting...')
         sys.exit()
 
     return biogridpath, fnetpath
+
+
+def determine_col():
+    """Determine which gene column in the BIOGRID file to read"""
+    entrezRegEx = re.compile(r'\d+')
+    if organism == 'cerevisiae':
+        sysNameRegEx = re.compile(r'Y[A-Z][A-Z]\d+')
+        ofcSymRegEx = re.compile(r'[A-Z]+')
+    elif organism == 'sapiens':
+        sysNameRegEx = re.compile(r'\w+')
+        ofcSymRegEx = re.compile(r'[A-Za-z]+.')
+    else:  # organism == 'melanogaster'
+        sysNameRegEx = re.compile(r'Dmel.')
+        ofcSymRegEx = re.compile(r'\w+')
+    
+    if entrezRegEx.match(geneExample) is not None:
+        colName = 'Entrez Gene Interactor A'
+    elif sysNameRegEx.match(geneExample) is not None:
+        colName = 'Systematic Name Interactor A'
+    elif ofcSymRegEx.match(geneExample) is not None:
+        colName = 'Official Symbol Interactor A'
+    else:
+        print('ERROR: Unable to match ID type! Exiting...')
+        sys.exit()
+
+    return colName
 
 
 class Biogrid:
@@ -66,7 +94,7 @@ class Biogrid:
         for seedGene in seedSets.keys():
             interactors = [gene for gene in seedSets[seedGene] 
                     if gene in self.func.index]
-            if len(interactors) > 1:
+            if len(interactors) > 0:
                 llsSum = self.func.loc[interactors,:].sum(axis=0)
                 trueLabels = pd.Series([0]*llsSum.size, index=llsSum.index)
                 trueLabels.loc[interactors] = 1
@@ -90,11 +118,12 @@ class NavPlot:
         start = bisect.bisect_left(AUCs, lowLim) 
         end = bisect.bisect(AUCs, upLim)
         minIntact = int(input('Enter the minimum # of gene interactors: '))
-        self.idxs = [i for i in range(start, end+1) 
+        self.idxs = [i for i in range(start, end) 
                 if len(self.seed2interactors[self.seedAUC[i][1]]) >= minIntact]
         if len(self.idxs) < 1:
             print('NO SEEDS WITH MINIMUM # OF GENETIC INTERACTORS! EXITING...')
             sys.exit()
+        self.end = len(self.idxs) - 1
         self.pos = 0
         self.llsCut = float(input('Enter a cutoff for the LLS: '))
         self.mg = mygene.MyGeneInfo()
@@ -133,13 +162,18 @@ class NavPlot:
         self.fig.canvas.draw()
 
     def onpress(self, event):
-        end = len(self.idxs) - 1
         if event.key == 'up':
-            self.pos = np.clip(self.pos + 1, 0, end)
-            self.draw_net()
+            if self.pos == self.end:
+                pass
+            else:
+                self.pos = np.clip(self.pos + 1, 0, self.end)
+                self.draw_net()
         elif event.key == 'down':
-            self.pos = np.clip(self.pos - 1, 0, end)
-            self.draw_net()
+            if self.pos == 0:
+                pass
+            else:
+                self.pos = np.clip(self.pos - 1, 0, self.end)
+                self.draw_net()
         else:
             pass
 
@@ -153,11 +187,12 @@ biogridpath, fnetpath = setup_filepaths()
 
 print('\nReading in functional gene network...')
 funcNetDf = pd.read_pickle(fnetpath)
-biogrid = Biogrid(funcNetDf)
-biogrid.seed_set_predictability()
+geneExample = funcNetDf.columns[0]
+bg = Biogrid(funcNetDf)
+bg.seed_set_predictability()
 
 fig = plt.figure(figsize=(12,8))
-interactive = NavPlot(fig, funcNetDf, biogrid)
+interactive = NavPlot(fig, funcNetDf, bg)
 fig.canvas.mpl_connect('key_press_event', interactive.onpress)
 plt.tight_layout()
 plt.show()
