@@ -17,6 +17,7 @@ import networkx as nx
 import numpy as np
 import os.path
 import pandas as pd
+import re
 import sys
 from sklearn import metrics
 
@@ -71,22 +72,24 @@ def determine_col():
 
 
 class Biogrid:
-    def __init__(self, df):
+    def __init__(self, df, colName):
         self.func = df
         self.seedAUC = list()
         self.seed2interactors = dict()
+        self.colName = colName
 
     def read_biogrid(self):
         experimentSys = input('\nEnter the experimental system:\n')
         seedSets = collections.defaultdict(set)
         biogridfile = open(biogridpath)
         header = biogridfile.readline().split('\t')
+        geneColNum = header.index(self.colName)
         expSysColNum = header.index('Experimental System')
         for line in biogridfile:
             tokens = line.split('\t')
             if tokens[expSysColNum] == experimentSys:
-                seedSets[tokens[1]].add(tokens[2])
-                seedSets[tokens[2]].add(tokens[1])
+                seedSets[tokens[geneColNum]].add(tokens[geneColNum + 1])
+                seedSets[tokens[geneColNum + 1]].add(tokens[geneColNum])
         return seedSets
 
     def seed_set_predictability(self):
@@ -135,23 +138,27 @@ class NavPlot:
         interactors = self.seed2interactors[seedGene]
         subnet = self.func[interactors].copy()
         edges = list(subnet[subnet > self.llsCut].stack().index)
-        G = nx.Graph()
-        G.add_edges_from(edges)
-        nodedist = 1.5/math.sqrt(nx.number_of_nodes(G))
-        pos_ = nx.spring_layout(G, k=nodedist, scale=12.0)
-        colored = set(itertools.chain.from_iterable(edges)) & set(interactors)
-        nx.draw_networkx_nodes(G, pos=pos_, nodelist=list(colored), node_size=0, 
-                node_color='c')
-        otherNodes = list(set(G.nodes()) - colored)
-        nx.draw_networkx_nodes(G, pos=pos_, nodelist=otherNodes, node_size=30, 
-                node_color='w', alpha=0.25)
-        nx.draw_networkx_edges(G, pos=pos_, alpha=0.25)
-        try:
-            labels_ = {g:self.mg.getgene(g)['name'] for g in colored}
-        except:
-            labels_ = {g:g for g in colored}
-        nx.draw_networkx_labels(G, pos=pos_, labels=labels_, font_size=8, 
-                font_color='b')
+        if edges != []:
+            G = nx.Graph()
+            G.add_edges_from(edges)
+            nodedist = 1.5/math.sqrt(nx.number_of_nodes(G))
+            pos_ = nx.spring_layout(G, k=nodedist, scale=12.0)
+            colored = set(itertools.chain.from_iterable(edges)) & set(interactors)
+            nx.draw_networkx_nodes(G, pos=pos_, nodelist=list(colored), node_size=0, 
+                    node_color='c')
+            otherNodes = list(set(G.nodes()) - colored)
+            nx.draw_networkx_nodes(G, pos=pos_, nodelist=otherNodes, node_size=30, 
+                    node_color='w', alpha=0.25)
+            nx.draw_networkx_edges(G, pos=pos_, alpha=0.25)
+            try:
+                labels_ = {g:self.mg.getgene(g)['name'] for g in colored}
+            except:
+                labels_ = {g:g for g in colored}
+            nx.draw_networkx_labels(G, pos=pos_, labels=labels_, font_size=8, 
+                    font_color='b')
+        else:
+            self.ax.text(0.35, 0.5, 'No edges meeting LLS cutoff!', 
+                    transform=self.ax.transAxes, fontsize=18)
         AUC = self.seedAUC[self.idxs[self.pos]][0]
         try:
             seedName = self.mg.getgene(seedGene)['name']
@@ -188,7 +195,9 @@ biogridpath, fnetpath = setup_filepaths()
 print('\nReading in functional gene network...')
 funcNetDf = pd.read_pickle(fnetpath)
 geneExample = funcNetDf.columns[0]
-bg = Biogrid(funcNetDf)
+colName = determine_col()
+
+bg = Biogrid(funcNetDf, colName)
 bg.seed_set_predictability()
 
 fig = plt.figure(figsize=(12,8))
